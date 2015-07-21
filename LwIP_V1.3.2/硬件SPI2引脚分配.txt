@@ -1,0 +1,12 @@
+引脚	功能
+1	SS	PG15	
+2	MOSI	PB15	
+3	GND	
+4	VDD
+5	SCK	PB13	
+6	GND
+7	MISO	PB14	
+8	N/a
+9	N/a
+
+ADS7843 CS 	PB12 必须设置为1，和液晶屏上SD卡共用SPI2

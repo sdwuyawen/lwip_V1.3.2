@@ -1,0 +1,23 @@
+#*.*
+#!/V1.1.7.8
+#!*.c
+#!*.h
+
+*.o
+*.crf
+*.d
+*.axf
+*.bin
+*.hex
+
+/LwIP_V1.3.2/MDK-Proj
+#/V1.1.7.8/Project/Output/
+#/V1.1.7.8/Project/Flash
+
+#!/V1.1.7.8/Project/Flash/Obj/output.sct
+#上一行无效
+#git add -f /V1.1.7.8/Project/Flash/Obj/output.sct
+#git add -f /V1.1.7.8/Project/scts
+
+#enc28j60_lwip/MDK-Proj
+#*.uvgui.*
