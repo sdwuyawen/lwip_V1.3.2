@@ -109,6 +109,7 @@ struct memp {
 
 /** This array holds the first free element of each pool.
  *  Elements form a linked list. */
+/* 指向每类pool中第一个pool */
 static struct memp *memp_tab[MEMP_MAX];
 
 #else /* MEMP_MEM_MALLOC */
@@ -118,6 +119,11 @@ static struct memp *memp_tab[MEMP_MAX];
 #endif /* MEMP_MEM_MALLOC */
 
 /** This array holds the element sizes of each pool. */
+/* 定义每种类型POOL的大小 
+ * LWIP_MEM_ALIGN_SIZE(sizeof(struct raw_pcb))
+ * LWIP_MEM_ALIGN_SIZE(sizeof(struct udp_pcb))
+ * ...
+ */
 #if !MEM_USE_POOLS && !MEMP_MEM_MALLOC
 static
 #endif
@@ -129,12 +135,24 @@ const u16_t memp_sizes[MEMP_MAX] = {
 #if !MEMP_MEM_MALLOC /* don't build if not configured for use in lwipopts.h */
 
 /** This array holds the number of elements in each pool. */
+/* 定义每种POOL的个数
+ * MEMP_NUM_RAW_PCB
+ * MEMP_NUM_UDP_PCB
+ * MEMP_NUM_TCP_PCB
+ * ...
+ */
 static const u16_t memp_num[MEMP_MAX] = {
 #define LWIP_MEMPOOL(name,num,size,desc)  (num),
 #include "lwip/memp_std.h"
 };
 
 /** This array holds a textual description of each pool. */
+/* 定义每种POOL的描述字符串
+ * "RAW_PCB" 
+ * "UDP_PCB"
+ * "TCP_PCB"
+ * ...
+ */
 #ifdef LWIP_DEBUG
 static const char *memp_desc[MEMP_MAX] = {
 #define LWIP_MEMPOOL(name,num,size,desc)  (desc),
@@ -143,6 +161,10 @@ static const char *memp_desc[MEMP_MAX] = {
 #endif /* LWIP_DEBUG */
 
 /** This is the actual memory used by the pools. */
+/* 真正的内存池区域，在内存中开辟空间
+ * memp_memory[MEM_ALIGNMENT - 1 + () + () + () + ...]
+ * MEMP_SIZE是在每种内存池头部预留的空间，设置为0
+ */
 static u8_t memp_memory[MEM_ALIGNMENT - 1 
 #define LWIP_MEMPOOL(name,num,size,desc) + ( (num) * (MEMP_SIZE + MEMP_ALIGN_SIZE(size) ) )
 #include "lwip/memp_std.h"
@@ -269,14 +291,21 @@ memp_init(void)
     MEMP_STATS_AVAIL(avail, i, memp_num[i]);
   }
 
+	/* 把内存池起始地址向上对齐 */
   memp = LWIP_MEM_ALIGN(memp_memory);
   /* for every pool: */
+	/* 把每种POOL内部的所有POOL链接成链表
+	 * 每种POOL的链表头节点用memp_tab[]指示
+	 */
   for (i = 0; i < MEMP_MAX; ++i) {
     memp_tab[i] = NULL;
     /* create a linked list of memp elements */
+		/* 把该类所有POOL链接成链表 */
     for (j = 0; j < memp_num[i]; ++j) {
       memp->next = memp_tab[i];
+			/* memp_tab[i]在内部循环完成后，表示该类POOL中的第一个POOL地址 */
       memp_tab[i] = memp;
+			/* 该类POOL中的下一个POOL */
       memp = (struct memp *)((u8_t *)memp + MEMP_SIZE + memp_sizes[i]
 #if MEMP_OVERFLOW_CHECK
         + MEMP_SANITY_REGION_AFTER_ALIGNED
@@ -302,6 +331,7 @@ memp_init(void)
  *
  * @return a pointer to the allocated memory or a NULL pointer on error
  */
+/* 从内存池type中申请一个内存块 */
 void *
 #if !MEMP_OVERFLOW_CHECK
 memp_malloc(memp_t type)
@@ -314,29 +344,35 @@ memp_malloc_fn(memp_t type, const char* file, const int line)
  
   LWIP_ERROR("memp_malloc: type < MEMP_MAX", (type < MEMP_MAX), return NULL;);
 
+	/* 进入临界区 */
   SYS_ARCH_PROTECT(old_level);
 #if MEMP_OVERFLOW_CHECK >= 2
   memp_overflow_check_all();
 #endif /* MEMP_OVERFLOW_CHECK >= 2 */
 
+	/* 获取该类内存池中空闲块的链表头 */
   memp = memp_tab[type];
   
   if (memp != NULL) {
+		/* 调整该类内存池空闲块的链表头 */
     memp_tab[type] = memp->next;
 #if MEMP_OVERFLOW_CHECK
     memp->next = NULL;
     memp->file = file;
     memp->line = line;
 #endif /* MEMP_OVERFLOW_CHECK */
+		/* 统计该类POOL使用情况 */
     MEMP_STATS_INC_USED(used, type);
     LWIP_ASSERT("memp_malloc: memp properly aligned",
                 ((mem_ptr_t)memp % MEM_ALIGNMENT) == 0);
+		/* 申请到的内存池的首地址 */
     memp = (struct memp*)((u8_t*)memp + MEMP_SIZE);
   } else {
     LWIP_DEBUGF(MEMP_DEBUG | LWIP_DBG_LEVEL_SERIOUS, ("memp_malloc: out of memory in pool %s\n", memp_desc[type]));
     MEMP_STATS_INC(err, type);
   }
 
+	/* 退出临界区 */
   SYS_ARCH_UNPROTECT(old_level);
 
   return memp;
@@ -360,8 +396,10 @@ memp_free(memp_t type, void *mem)
   LWIP_ASSERT("memp_free: mem properly aligned",
                 ((mem_ptr_t)mem % MEM_ALIGNMENT) == 0);
 
+	/* 得到待释放的内存块的首地址 */
   memp = (struct memp *)((u8_t*)mem - MEMP_SIZE);
 
+	/* 进入临界区 */
   SYS_ARCH_PROTECT(old_level);
 #if MEMP_OVERFLOW_CHECK
 #if MEMP_OVERFLOW_CHECK >= 2
@@ -371,8 +409,10 @@ memp_free(memp_t type, void *mem)
 #endif /* MEMP_OVERFLOW_CHECK >= 2 */
 #endif /* MEMP_OVERFLOW_CHECK */
 
+	/* 减少该类型POOL使用统计量 */
   MEMP_STATS_DEC(used, type); 
   
+	/* 把POOL链接入该类POOL空闲块链表 */
   memp->next = memp_tab[type]; 
   memp_tab[type] = memp;
 
@@ -380,6 +420,7 @@ memp_free(memp_t type, void *mem)
   LWIP_ASSERT("memp sanity", memp_sanity());
 #endif /* MEMP_SANITY_CHECK */
 
+	/* 退出临界区 */
   SYS_ARCH_UNPROTECT(old_level);
 }
 

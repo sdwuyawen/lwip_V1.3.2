@@ -97,4 +97,6 @@ typedef int sys_prot_t;
 #define LWIP_PROVIDE_ERRNO		//使用LwIP内部自带的错误代码
 #define BYTE_ORDER LITTLE_ENDIAN	//处理器是小端模式
 
+
+
 #endif /* __CC_H__ */

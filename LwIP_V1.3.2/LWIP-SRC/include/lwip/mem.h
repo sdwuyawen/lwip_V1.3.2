@@ -92,6 +92,7 @@ void *mem_calloc(mem_size_t count, mem_size_t size);
 void  mem_free(void *mem);
 #endif /* MEM_LIBC_MALLOC */
 
+/* °Ñsize¶ÔÆëµ½MEM_ALIGNMENT */
 #ifndef LWIP_MEM_ALIGN_SIZE
 #define LWIP_MEM_ALIGN_SIZE(size) (((size) + MEM_ALIGNMENT - 1) & ~(MEM_ALIGNMENT-1))
 #endif

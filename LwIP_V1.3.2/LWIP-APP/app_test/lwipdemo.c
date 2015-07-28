@@ -19,7 +19,7 @@
 
 /*******************************LwIP相关定义************************************************/
 
-#define CLOCKTICKS_PER_MS 10    //定义LwIP的时钟节拍
+#define MS_PER_CLOCKTICK 10    //定义LwIP的时钟节拍
 
 static struct ip_addr ipaddr, netmask, gw; //定义IP地址
 struct netif enc28j60_netif;  //定义网络接口
@@ -42,29 +42,33 @@ void loopclient_init(void);
 //LWIP查询
 void LWIP_Polling(void)
 {
-	if(timer_expired(&input_time,50 / 10)) //接收包，周期处理函数,50ms
+//	if(timer_expired(&input_time,50 / 10)) //接收包，周期处理函数,50ms
 	{
-		ethernetif_input(&enc28j60_netif); //轮询以太网接口
-		netif_poll(&loop_netif);	//轮询环回接口
+		/* ethernetif_input()调用接口底层输入函数，如果有输入数据包，则调用
+		 * 接口的input()函数向上提交数据包
+		 * ethernetif_input() -> ethernet_input()
+		 */
+		ethernetif_input(&enc28j60_netif);	//轮询以太网接口
+		netif_poll(&loop_netif);						//轮询环回接口
 	}
-	if(timer_expired(&last_tcp_time,TCP_TMR_INTERVAL/CLOCKTICKS_PER_MS))//TCP处理定时器处理函数
+	if(timer_expired(&last_tcp_time,TCP_TMR_INTERVAL/MS_PER_CLOCKTICK))		//TCP处理定时器处理函数
 	{
 		tcp_tmr();
 	}
-	if(timer_expired(&last_arp_time,ARP_TMR_INTERVAL/CLOCKTICKS_PER_MS))//ARP处理定时器
+	if(timer_expired(&last_arp_time,ARP_TMR_INTERVAL/MS_PER_CLOCKTICK))		//ARP处理定时器
 	{
 		etharp_tmr();
 	}
-	if(timer_expired(&last_ipreass_time,IP_TMR_INTERVAL/CLOCKTICKS_PER_MS))//IP重新组装定时器
+	if(timer_expired(&last_ipreass_time,IP_TMR_INTERVAL/MS_PER_CLOCKTICK))//IP重新组装定时器
 	{ 
 		ip_reass_tmr();
 	}
 #if LWIP_DHCP>0			   					
-	if(timer_expired(&last_dhcp_fine_time,DHCP_FINE_TIMER_MSECS/CLOCKTICKS_PER_MS))
+	if(timer_expired(&last_dhcp_fine_time,DHCP_FINE_TIMER_MSECS/MS_PER_CLOCKTICK))
 	{
 		dhcp_fine_tmr();
 	}
-	if(timer_expired(&last_dhcp_coarse_time,DHCP_COARSE_TIMER_MSECS/CLOCKTICKS_PER_MS))
+	if(timer_expired(&last_dhcp_coarse_time,DHCP_COARSE_TIMER_MSECS/MS_PER_CLOCKTICK))
 	{
 		dhcp_coarse_tmr();
 	}  
@@ -204,14 +208,18 @@ static err_t tcpserver_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_
 	{        
 		/* We call this function to tell the LwIp that we have processed the data */
 		/* This lets the stack advertise a larger window, so more data can be received*/
+		/* 通知协议栈更新接收窗口 */
 		tcp_recved(pcb, p->tot_len);
 
 		{
 			// Uart_Printf("Do tcp write when receive\n");
+			/* 把接收到的第一个pbuf中的数据返回给客户端 */
 			tcp_write(pcb, p->payload, p->len, 1);
 		}
+		/* 释放pbuf */
 		pbuf_free(p);
-	} 
+	}
+	/* 如果pbuf == NULL 且 err == ERR_OK，表示另一方在关闭该TCP连接 */
 	else if (err == ERR_OK) 
 	{
 		/* When the pbuf is NULL and the err is ERR_OK, the remote end is closing the connection. */
@@ -350,7 +358,7 @@ void LwIP_APP_Init(void)
 	  netmask.addr = 0;
 	  gw.addr = 0; 
 	#else										//
-	  IP4_ADDR(&ipaddr, 202, 194, 201, 68);  		//设置本地ip地址
+	  IP4_ADDR(&ipaddr, 202, 194, 201, 252);  		//设置本地ip地址
 	  IP4_ADDR(&gw, 202, 194, 201, 254);			//网关
 	  IP4_ADDR(&netmask, 255, 255, 255, 0);		//子网掩码	 
 	#endif
@@ -358,8 +366,16 @@ void LwIP_APP_Init(void)
 	init_lwip_timer();  //初始化LWIP定时器
 	//初始化LWIP协议栈,执行检查用户所有可配置的值，初始化所有的模块
 	lwip_init(); 
-	//添加网络接口
-	while((netif_add(&enc28j60_netif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init, &ethernet_input)==NULL))
+	
+	//添加网络接口enc28j60
+	while((netif_add(&enc28j60_netif, 
+										&ipaddr, 
+										&netmask, 
+										&gw, 
+										NULL, 
+										&ethernetif_init, 
+										&ethernet_input					/* ARP层的数据包输入函数 */
+									) == NULL))
 	{
 		LCD_ShowString(60,170,200,16,16,"ENC28J60 Init Error!");	 
 		bsp_DelayMS(200);
@@ -368,16 +384,21 @@ void LwIP_APP_Init(void)
 	}
 	//注册默认的网络接口
 	netif_set_default(&enc28j60_netif);
-	//建立网络接口用于处理通信
+	//使能该网络接口
 	netif_set_up(&enc28j60_netif); 
 	
-	//添加环回接口
+	//添加环回接口loopif
 	IP4_ADDR(&gw, 127,0,0,1);
-    IP4_ADDR(&ipaddr, 127,0,0,1);
-    IP4_ADDR(&netmask, 255,255,255,0);
-  
-    netif_add(&loop_netif,&ipaddr, &netmask, &gw, NULL, loopif_init,NULL);
-    netif_set_up(&loop_netif);
+	IP4_ADDR(&ipaddr, 127,0,0,1);
+	IP4_ADDR(&netmask, 255,255,255,0);
+
+	netif_add(&loop_netif,
+						&ipaddr, 
+						&netmask, 
+						&gw, 
+						NULL, 
+						loopif_init,NULL);
+	netif_set_up(&loop_netif);
 	 
 	/*
 	Note: you must call dhcp_fine_tmr() and dhcp_coarse_tmr() at

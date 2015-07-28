@@ -46,7 +46,7 @@
 #define LWIP_SOCKET                     0
 
 
-#define LWIP_DHCP                       0 //使能DHCP模塊
+#define LWIP_DHCP                       0 //使能DHCP模块
 #define MEM_ALIGNMENT                   4  //必须4字节对齐 曾出现在memset的时候hardfault
 #define LWIP_DNS                        1
 

@@ -66,7 +66,7 @@
 //MAC地址
 const u8 mymac[6]={0x04,0x02,0x35,0x00,0x00,0x01};	//MAC地址
 //定义发送接受缓冲区
-u8 lwip_buf[1500*2];
+u8 lwip_buf[1518 - 4];
 
 
 /**
@@ -109,7 +109,7 @@ low_level_init(struct netif *netif)
   netif->mtu = MAX_FRAMELEN; 
   if(ENC28J60_Init((u8*)mymac))	//初始化ENC28J60	
   {
-	return ERR_IF;			//底层网络接口错误
+		return ERR_IF;			//底层网络接口错误
   }
   //指示灯状态:0x476 is PHLCON LEDA(绿)=links status, LEDB(红)=receive/transmit
   //PHLCON：PHY 模块LED 控制寄存器	    
@@ -151,6 +151,14 @@ low_level_output(struct netif *netif, struct pbuf *p)
   pbuf_header(p, -ETH_PAD_SIZE); /* drop the padding word */
 #endif
 
+	/* pbuf中的数据过长，无法复制到发送缓冲区 */
+	if(p->tot_len > sizeof(lwip_buf))
+	{
+		LINK_STATS_INC(link.err);
+		return ERR_IF;
+	}
+	
+	/* 把pbuf中的数据复制的lwip_buf中，以写入enc28j60 */
   for(q = p; q != NULL; q = q->next) {
     /* Send the data from the pbuf to the interface, one pbuf at a
        time. The size of the data in each pbuf is kept in the ->len
@@ -162,11 +170,11 @@ low_level_output(struct netif *netif, struct pbuf *p)
    // signal that packet should be sent();
   ENC28J60_Packet_Send(send_len,lwip_buf);
 
-
 #if ETH_PAD_SIZE
   pbuf_header(p, ETH_PAD_SIZE); /* reclaim the padding word */
 #endif
   
+	/* 已经发送数据包数量+1 */
   LINK_STATS_INC(link.xmit);
 
   return ERR_OK;
@@ -190,12 +198,18 @@ low_level_input(struct netif *netif)
 	
   /* Obtain the size of the packet and put it into the "len"
      variable. */
-  len = ENC28J60_Packet_Receive(MAX_FRAMELEN,lwip_buf);
+	/* 接收的字节最大长度为1518 - 4 = 1514，即不包含CRC校验的以太网帧最大长度 */
+  len = ENC28J60_Packet_Receive(MAX_FRAMELEN - 4,lwip_buf);
 
 #if ETH_PAD_SIZE
   len += ETH_PAD_SIZE; /* allow room for Ethernet padding */
 #endif
 
+	/* 检查以太网帧里是否是ARP帧或者是IP帧，都不符合的话丢弃本帧数据 */
+//	if(...)
+//	{
+//		return NULL;
+//	}
   /* We allocate a pbuf chain of pbufs from the pool. */
   /* PBUF_RAW表示不预留offset空间，offset空间通常是放置IP数据报或TCP数据报头结构的 */
   p = pbuf_alloc(PBUF_RAW, len, PBUF_POOL);
@@ -250,7 +264,9 @@ low_level_input(struct netif *netif)
 void ethernetif_input(struct netif *netif)
 {
 //  struct ethernetif *ethernetif;
+	//以太网帧头
   struct eth_hdr *ethhdr;
+	//pbuf缓冲区
   struct pbuf *p;
 
  // ethernetif = netif->state;
@@ -260,8 +276,10 @@ void ethernetif_input(struct netif *netif)
   /* no packet could be read, silently ignore this */
   if (p == NULL) return;
   /* points to packet payload, which starts with an Ethernet header */
+	//获取从low_level_input读取到的缓冲区首地址，里面保存了以太网帧
   ethhdr = p->payload;
 
+	//htons()是把一个网络字节序的unsigned short转换为主机字节序
   switch (htons(ethhdr->type)) {
   /* IP or ARP packet? */
   case ETHTYPE_IP:
@@ -272,13 +290,16 @@ void ethernetif_input(struct netif *netif)
   case ETHTYPE_PPPOE:
 #endif /* PPPOE_SUPPORT */
     /* full packet send to tcpip_thread to process */
+		//把pbuf提交给上层处理
+		//对于enc28j60接口，netif->input=ethernet_input()，在netif_add()时被设置
     if (netif->input(p, netif)!=ERR_OK)
      { LWIP_DEBUGF(NETIF_DEBUG, ("ethernetif_input: IP input error\n"));
        pbuf_free(p);
        p = NULL;
      }
     break;
-
+	
+	//不是ARP协议且不是IP协议，则直接丢弃
   default:
     pbuf_free(p);
     p = NULL;

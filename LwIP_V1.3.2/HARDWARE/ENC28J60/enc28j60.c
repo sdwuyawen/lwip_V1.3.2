@@ -100,7 +100,7 @@ static void ENC28J60_SPI1_Init(void)
 	SPI2_ReadWriteByte(0xff);//启动传输		
 */
  	GPIO_InitTypeDef GPIO_InitStructure;
-  	SPI_InitTypeDef  SPI_InitStructure;
+	SPI_InitTypeDef  SPI_InitStructure;
 
 	RCC_APB2PeriphClockCmd(	RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOC, ENABLE );//PORTA时钟使能 
 	RCC_APB2PeriphClockCmd(	RCC_APB2Periph_SPI1,  ENABLE );//SPI1时钟使能 
@@ -140,7 +140,7 @@ static void ENC28J60_SPI1_Init(void)
 	SPI_InitStructure.SPI_CPOL = SPI_CPOL_Low;		//串行同步时钟的空闲状态为低电平
 	SPI_InitStructure.SPI_CPHA = SPI_CPHA_1Edge;	//串行同步时钟的第一个跳变沿（上升或下降）数据被采样
 	SPI_InitStructure.SPI_NSS = SPI_NSS_Soft;		//NSS信号由硬件（NSS管脚）还是软件（使用SSI位）管理:内部NSS信号有SSI位控制
-	SPI_InitStructure.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;		//定义波特率预分频的值:波特率预分频值为16
+	SPI_InitStructure.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_8;		//定义波特率预分频的值:波特率预分频值为16
 	SPI_InitStructure.SPI_FirstBit = SPI_FirstBit_MSB;	//指定数据传输从MSB位还是LSB位开始:数据传输从MSB位开始
 	SPI_InitStructure.SPI_CRCPolynomial = 7;	//CRC值计算的多项式
 	SPI_Init(SPI1, &SPI_InitStructure);  //根据SPI_InitStruct中指定的参数初始化外设SPIx寄存器
@@ -289,6 +289,8 @@ extern uint32_t ENC_TX_Reset_Cnt;		//发送逻辑复位次数
 //packet:数据包
 void ENC28J60_Packet_Send(u32 len,u8* packet)
 {
+	/* 这里是否需要判断len大于ENC28J60发送缓冲区剩余TX SRAM大小？ */
+	
 	//要发送的字节数不能超过MAMXFL中定义的字节数，否则会出现发送错误，见手册12.1.3
 	if(len > MAX_FRAMELEN - 4)
 	{
@@ -367,6 +369,7 @@ u32 ENC28J60_Packet_Receive(u32 maxlen,u8* packet)
 		
 	ENC_RX_Pkt_Total_Cnt ++;	//接收数据包总数++
 	
+	/* 注意：上一次保存的NextPacketPtr如果出错(例如被野指针修改)，可能会造成接收逻辑连续错误，最终接收停止 */
 	//设置接收缓冲器读指针
 	ENC28J60_Write(ERDPTL,(NextPacketPtr));
 	ENC28J60_Write(ERDPTH,(NextPacketPtr)>>8);	   
@@ -380,7 +383,7 @@ u32 ENC28J60_Packet_Receive(u32 maxlen,u8* packet)
 	//读取接收状态
 	rxstat = ENC28J60_Read_Op(ENC28J60_READ_BUF_MEM,0);
 	rxstat |= ENC28J60_Read_Op(ENC28J60_READ_BUF_MEM,0)<<8;
-	//限制接收长度	
+	//限制接收长度，以太网帧去掉CRC校验最长1518-4=1514字节
 	if (len > maxlen)
 	{
 		len = maxlen;
@@ -631,7 +634,7 @@ uint8_t ENC28J60_Full_Reset(u8* macaddr)
 	ENC28J60_Write(MABBIPG,0x15);
 	// Set the maximum packet size which the controller will accept
 	// Do not send packets longer than MAX_FRAMELEN:
-	// 最大帧长度  1500
+	// 最大帧长度  1518。Linux kernel里enc28j60驱动也使用的1518
 	ENC28J60_Write(MAMXFLL,MAX_FRAMELEN&0xFF);	
 	ENC28J60_Write(MAMXFLH,MAX_FRAMELEN>>8);
 	// do bank 3 stuff
