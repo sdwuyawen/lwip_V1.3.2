@@ -79,6 +79,7 @@ typedef enum {
 extern const u16_t memp_sizes[MEMP_MAX];
 #endif /* MEMP_MEM_MALLOC || MEM_USE_POOLS */
 
+/* 如果用内存堆的方式实现内存池的分配 */
 #if MEMP_MEM_MALLOC
 
 #include "mem.h"

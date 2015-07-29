@@ -38,6 +38,7 @@
 extern "C" {
 #endif
 
+/* MEM_LIBC_MALLOC为1，表示使用C库中的malloc calloc free进行内存分配和释放 */
 #if MEM_LIBC_MALLOC
 
 #include <stddef.h> /* for size_t */
