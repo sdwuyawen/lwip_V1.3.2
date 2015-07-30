@@ -178,6 +178,18 @@ pbuf_pool_is_empty(void)
  * @return the allocated pbuf. If multiple pbufs where allocated, this
  * is the first pbuf of a pbuf chain.
  */
+/* layer是pbuf_layer类型，预留不同的首部空间。可以是	
+ * PBUF_TRANSPORT,
+ * PBUF_IP,
+ * PBUF_LINK,
+ * PBUF_RAW
+ * length是要申请的数据区长度
+ * type是要申请的pbuf类型，可以是
+ * PBUF_RAM
+ * PBUF_ROM
+ * PBUF_REF
+ * PBUF_POOL
+ */
 struct pbuf *
 pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
 {
@@ -188,45 +200,62 @@ pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
 
   /* determine header offset */
   offset = 0;
+	/* 根据申请层次不同，选择不同的预留空间 */
   switch (layer) {
+	/* 传输层预留TCP首部空间，注意这里没有break;，继续累加 */
   case PBUF_TRANSPORT:
     /* add room for transport (often TCP) layer header */
     offset += PBUF_TRANSPORT_HLEN;
     /* FALLTHROUGH */
+	/* 预留网络层首部空间 */
   case PBUF_IP:
     /* add room for IP layer header */
     offset += PBUF_IP_HLEN;
     /* FALLTHROUGH */
+	/* 预留链路层首部空间 */
   case PBUF_LINK:
     /* add room for link layer header */
     offset += PBUF_LINK_HLEN;
     break;
+	/* 不预留首部空间 */
   case PBUF_RAW:
     break;
+	/* 层次参数错误，返回错误信息 */
   default:
     LWIP_ASSERT("pbuf_alloc: bad pbuf layer", 0);
     return NULL;
   }
 
+	/* 根据要申请的type，分配具体类型的pbuf */
   switch (type) {
+	/* 在内存池分配pbuf和数据区
+	 * PBUF_POOL类型可能需要分配多个MEMP_PBUF_POOL，以满足申请的空间 
+	 */
   case PBUF_POOL:
     /* allocate head of pbuf chain into p */
+		/* MEMP_PBUF_POOL申请的大小是pbuf结构+PBUF_POOL_BUFSIZE。
+		 * PBUF_POOL_BUFSIZE是1460(TCP的MSS)+20+20+14=1514，	*/
     p = memp_malloc(MEMP_PBUF_POOL);
     LWIP_DEBUGF(PBUF_DEBUG | LWIP_DBG_TRACE, ("pbuf_alloc: allocated pbuf %p\n", (void *)p));
+		/* 分配失败，则返回NULL */
     if (p == NULL) {
       PBUF_POOL_IS_EMPTY();
       return NULL;
     }
+		/* 初始化type和next字段 */
     p->type = type;
     p->next = NULL;
 
     /* make the payload pointer point 'offset' bytes into pbuf data memory */
+		/* 设置数据字段指针，预留出pbuf和offset大小 */
     p->payload = LWIP_MEM_ALIGN((void *)((u8_t *)p + (SIZEOF_STRUCT_PBUF + offset)));
     LWIP_ASSERT("pbuf_alloc: pbuf p->payload properly aligned",
             ((mem_ptr_t)p->payload % MEM_ALIGNMENT) == 0);
     /* the total length of the pbuf chain is the requested size */
+		/* 设置pbuf链表第一个pbuf中的tot_len字段 */
     p->tot_len = length;
     /* set the length of the first pbuf in the chain */
+		/* 第一个pbuf中的数据段长度是PBUF_POOL_BUFSIZE(1514) - 预留大小 */
     p->len = LWIP_MIN(length, PBUF_POOL_BUFSIZE_ALIGNED - LWIP_MEM_ALIGN_SIZE(offset));
     LWIP_ASSERT("check p->payload + p->len does not overflow pbuf",
                 ((u8_t*)p->payload + p->len <=
@@ -234,17 +263,28 @@ pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
     LWIP_ASSERT("PBUF_POOL_BUFSIZE must be bigger than MEM_ALIGNMENT",
       (PBUF_POOL_BUFSIZE_ALIGNED - LWIP_MEM_ALIGN_SIZE(offset)) > 0 );
     /* set reference count (needed here in case we fail) */
+		/* 引用次数设为1 */
     p->ref = 1;
 
     /* now allocate the tail of the pbuf chain */
+		/* 检查分配的第一个pbuf空间是否满足申请的length，不满足则继续申请，构造
+		 * pbuf链表
+		 */
 
     /* remember first pbuf for linkage in next iteration */
+		/* r是pbuf上最后一个节点指针，用于把新节点放入链表 
+		 * p是pbuf链表头节点指针
+		 */
     r = p;
     /* remaining length to be allocated */
+		/* 还需申请的空间 */
     rem_len = length - p->len;
     /* any remaining pbufs to be allocated? */
+		/* 仍然需要申请 */
     while (rem_len > 0) {
+			/* 申请新的pbuf，包括pbuf结构大小+1514 */
       q = memp_malloc(MEMP_PBUF_POOL);
+			/* 申请失败，则释放pbuf链表所有节点 */
       if (q == NULL) {
         PBUF_POOL_IS_EMPTY();
         /* free chain so far allocated */
@@ -252,41 +292,61 @@ pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
         /* bail out unsuccesfully */
         return NULL;
       }
+			/* 设置新申请节点的类型 */
       q->type = type;
       q->flags = 0;
+			/* 新节点next指针设为0 */
       q->next = NULL;
       /* make previous pbuf point to this pbuf */
+			/* 新节点放入链表 */
       r->next = q;
       /* set total length of this pbuf and next in chain */
       LWIP_ASSERT("rem_len < max_u16_t", rem_len < 0xffff);
+			/* 新节点和后续所有所有节点数据段总长度 */
       q->tot_len = (u16_t)rem_len;
       /* this pbuf length is pool size, unless smaller sized tail */
+			/* 新节点本身数据段长度
+			 * 新节点数据段可承载的最大长度可能大于要申请的长度，
+			 * 所以len要设置为实际申请的长度和最大长度的最小值
+			 */
       q->len = LWIP_MIN((u16_t)rem_len, PBUF_POOL_BUFSIZE_ALIGNED);
+			/* 新节点的数据段指针 */
       q->payload = (void *)((u8_t *)q + SIZEOF_STRUCT_PBUF);
       LWIP_ASSERT("pbuf_alloc: pbuf q->payload properly aligned",
               ((mem_ptr_t)q->payload % MEM_ALIGNMENT) == 0);
       LWIP_ASSERT("check p->payload + p->len does not overflow pbuf",
                   ((u8_t*)p->payload + p->len <=
                    (u8_t*)p + SIZEOF_STRUCT_PBUF + PBUF_POOL_BUFSIZE_ALIGNED));
+			/* 新节点引用次数 */
       q->ref = 1;
+			/* 还需申请的长度 */
       /* calculate remaining length to be allocated */
       rem_len -= q->len;
       /* remember this pbuf for linkage in next iteration */
+			/* 保存pbuf最后一个节点指针 */
       r = q;
     }
     /* end of chain */
     /*r->next = NULL;*/
 
     break;
+	
+	/* 在内存堆分配pbuf结构和数据区域 */
   case PBUF_RAM:
     /* If pbuf is to be allocated in RAM, allocate memory for it. */
+		/* 申请总大小是pbuf结构大小+offset+数据区域大小 */
     p = (struct pbuf*)mem_malloc(LWIP_MEM_ALIGN_SIZE(SIZEOF_STRUCT_PBUF + offset) + LWIP_MEM_ALIGN_SIZE(length));
     if (p == NULL) {
+			/* 申请失败，则返回NULL */
       return NULL;
     }
     /* Set up internal structure of the pbuf. */
+		/* 设置pbuf的数据区指针 */
     p->payload = LWIP_MEM_ALIGN((void *)((u8_t *)p + SIZEOF_STRUCT_PBUF + offset));
+		/* 从内存堆分配的pbuf只需要一个，不需要链表。因为第一个节点就可以获得要申请的数据区长度
+		 * 数据区总长度 */
     p->len = p->tot_len = length;
+		/* 仅有一个节点 */
     p->next = NULL;
     p->type = type;
 
@@ -294,18 +354,23 @@ pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
            ((mem_ptr_t)p->payload % MEM_ALIGNMENT) == 0);
     break;
   /* pbuf references existing (non-volatile static constant) ROM payload? */
+	/* PBUF_ROM和PBUF_REF类型，只分配PBUF结构，payload指向的数据区不需申请 */
   case PBUF_ROM:
   /* pbuf references existing (externally allocated) RAM payload? */
   case PBUF_REF:
     /* only allocate memory for the pbuf structure */
+		/* 从内存池中申请MEMP_PBUF类型的内存，详见memp_std.h */
     p = memp_malloc(MEMP_PBUF);
+		/* 申请失败，则返回NULL */
     if (p == NULL) {
       LWIP_DEBUGF(PBUF_DEBUG | LWIP_DBG_LEVEL_SERIOUS,
                   ("pbuf_alloc: Could not allocate MEMP_PBUF for PBUF_%s.\n",
                   (type == PBUF_ROM) ? "ROM" : "REF"));
       return NULL;
     }
+		/* 设置pbuf结构字段 */
     /* caller must set this field properly, afterwards */
+		/* PBUF_ROM和PBUF_REF类型的pbuf，必须由调用者设置payload字段 */
     p->payload = NULL;
     p->len = p->tot_len = length;
     p->next = NULL;
@@ -316,6 +381,7 @@ pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
     return NULL;
   }
   /* set reference count */
+	/* 除了PBUF_POOL类型，都没有设置ref。在这里同一设置ref */
   p->ref = 1;
   /* set flags */
   p->flags = 0;
@@ -339,6 +405,7 @@ pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type)
  *
  * @note Despite its name, pbuf_realloc cannot grow the size of a pbuf (chain).
  */
+/* 减少pbuf的长度，即在pbuf链表尾部释放一定空间 */
 void
 pbuf_realloc(struct pbuf *p, u16_t new_len)
 {
@@ -419,6 +486,9 @@ pbuf_realloc(struct pbuf *p, u16_t new_len)
  * not move the payload pointer in front of the start of the buffer.
  * @return non-zero on failure, zero on success.
  *
+ */
+/* 调整pbuf的payload指针，向前或者向后移动一定字节
+ * totlen和len也会被更新
  */
 u8_t
 pbuf_header(struct pbuf *p, s16_t header_size_increment)
@@ -534,6 +604,7 @@ pbuf_free(struct pbuf *p)
   struct pbuf *q;
   u8_t count;
 
+	/* 如果p==NULL，则返回0 */
   if (p == NULL) {
     LWIP_ASSERT("p != NULL", p != NULL);
     /* if assertions are disabled, proceed with debug output */
@@ -554,37 +625,51 @@ pbuf_free(struct pbuf *p)
    * obtain a zero reference count after decrementing*/
   while (p != NULL) {
     u16_t ref;
+		/* 申请临界保护变量 */
     SYS_ARCH_DECL_PROTECT(old_level);
     /* Since decrementing ref cannot be guaranteed to be a single machine operation
      * we must protect it. We put the new ref into a local variable to prevent
      * further protection. */
+		/* 进入临界区 */
     SYS_ARCH_PROTECT(old_level);
     /* all pbufs in a chain are referenced at least once */
     LWIP_ASSERT("pbuf_free: p->ref > 0", p->ref > 0);
     /* decrease reference count (number of pointers to pbuf) */
+		/* 该pbuf引用次数-1，并记录 */
     ref = --(p->ref);
+		/* 退出临界区 */
     SYS_ARCH_UNPROTECT(old_level);
     /* this pbuf is no longer referenced to? */
+		/* 该pbuf引用次数为0，则删除该pbuf */
     if (ref == 0) {
       /* remember next pbuf in chain for next iteration */
+			/* 记录pbuf链表中下一个pbuf结构地址 */
       q = p->next;
       LWIP_DEBUGF( PBUF_DEBUG | LWIP_DBG_TRACE, ("pbuf_free: deallocating %p\n", (void *)p));
+			/* 得到待释放的pbuf类型 */
       type = p->type;
       /* is this a pbuf from the pool? */
+			/* 如果是PBUF_POOL类型，则用内存池MEMP_PBUF_POOL类型释放函数 */
       if (type == PBUF_POOL) {
         memp_free(MEMP_PBUF_POOL, p);
       /* is this a ROM or RAM referencing pbuf? */
+			/* 如果是PBUF_ROM或PBUF_REF类型，
+			 * 则用内存池MEMP_PBUF类型释放函数 */
       } else if (type == PBUF_ROM || type == PBUF_REF) {
         memp_free(MEMP_PBUF, p);
       /* type == PBUF_RAM */
+			/* 如果是PBUF_RAM类型，则调用内存堆释放函数 */
       } else {
         mem_free(p);
       }
+			/* 释放的pbuf数量 */
       count++;
       /* proceed to next pbuf */
+			/* 继续处理pbuf链表下一个节点 */
       p = q;
     /* p->ref > 0, this pbuf is still referenced to */
     /* (and so the remaining pbufs in chain as well) */
+		/* 某pbuf节点的ref不为0，说明有其他地方仍在引用该节点，放弃释放该节点和后续节点 */
     } else {
       LWIP_DEBUGF( PBUF_DEBUG | LWIP_DBG_TRACE, ("pbuf_free: %p has ref %"U16_F", ending here.\n", (void *)p, ref));
       /* stop walking through the chain */
@@ -593,6 +678,7 @@ pbuf_free(struct pbuf *p)
   }
   PERF_STOP("pbuf_free");
   /* return number of de-allocated pbufs */
+	/* 返回释放的pbuf个数 */
   return count;
 }
 

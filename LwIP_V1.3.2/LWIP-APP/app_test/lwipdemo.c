@@ -373,8 +373,8 @@ void LwIP_APP_Init(void)
 										&netmask, 
 										&gw, 
 										NULL, 
-										&ethernetif_init, 
-										&ethernet_input					/* ARP层的数据包输入函数 */
+										&ethernetif_init, 				/* err_t (* init)(struct netif *netif) */
+										&ethernet_input					/* err_t (* input)(struct pbuf *p, struct netif *netif)) ARP层的数据包输入函数 */
 									) == NULL))
 	{
 		LCD_ShowString(60,170,200,16,16,"ENC28J60 Init Error!");	 

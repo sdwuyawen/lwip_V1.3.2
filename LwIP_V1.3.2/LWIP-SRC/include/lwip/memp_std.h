@@ -79,7 +79,15 @@ LWIP_MEMPOOL(SYS_TIMEOUT,    MEMP_NUM_SYS_TIMEOUT,     sizeof(struct sys_timeo),
  *     This allocates enough space for the pbuf struct and a payload.
  *     (Example: pbuf_payload_size=0 allocates only size for the struct)
  */
+/* 构造MEMP_PBUF和MEMP_PBUF_POOL两种内存池
+ * 参考LWIP_PBUF_MEMPOOL的定义
+ */
+/* MEMP_PBUF的大小是pbuf结构的大小 */
 LWIP_PBUF_MEMPOOL(PBUF,      MEMP_NUM_PBUF,            0,                             "PBUF_REF/ROM")
+/* MEMP_PBUF_POOL的大小是pbuf结构+PBUF_POOL_BUFSIZE。
+ * PBUF_POOL_BUFSIZE是1460(TCP的MSS)+20+20+14=1514，
+ * 即除了CRC校验之外的以太网帧最大长度 
+ */
 LWIP_PBUF_MEMPOOL(PBUF_POOL, PBUF_POOL_SIZE,           PBUF_POOL_BUFSIZE,             "PBUF_POOL")
 
 

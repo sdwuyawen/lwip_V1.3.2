@@ -71,7 +71,9 @@
 #define NETIF_LINK_CALLBACK(n) { /* NOP */ }
 #endif /* LWIP_NETIF_LINK_CALLBACK */ 
 
+/* netif链表表头 */
 struct netif *netif_list;
+/* 默认netif */
 struct netif *netif_default;
 
 /**
@@ -88,6 +90,9 @@ struct netif *netif_default;
  *
  * @return netif, or NULL if failed.
  */
+/* err_t (* init)(struct netif *netif) = ethernetif_init 
+ * err_t (* input)(struct pbuf *p, struct netif *netif)) = ethernet_input
+ */
 struct netif *
 netif_add(struct netif *netif, struct ip_addr *ipaddr, struct ip_addr *netmask,
   struct ip_addr *gw,
@@ -95,6 +100,7 @@ netif_add(struct netif *netif, struct ip_addr *ipaddr, struct ip_addr *netmask,
   err_t (* init)(struct netif *netif),
   err_t (* input)(struct pbuf *p, struct netif *netif))
 {
+	/* 记录网络接口编号 */
   static u8_t netifnum = 0;
 
   /* reset new interface configuration state */
@@ -126,7 +132,11 @@ netif_add(struct netif *netif, struct ip_addr *ipaddr, struct ip_addr *netmask,
 
   /* remember netif specific state information data */
   netif->state = state;
+	/* 网络接口编号 */
   netif->num = netifnum++;
+	/* 注册input函数
+	 * 即netif->input = ethernet_input
+	 */
   netif->input = input;
 #if LWIP_NETIF_HWADDRHINT
   netif->addr_hint = NULL;
@@ -135,6 +145,7 @@ netif_add(struct netif *netif, struct ip_addr *ipaddr, struct ip_addr *netmask,
   netif->loop_cnt_current = 0;
 #endif /* ENABLE_LOOPBACK && LWIP_LOOPBACK_MAX_PBUFS */
 
+	/* 设置网络接口的ip,netmask,gw */
   netif_set_addr(netif, ipaddr, netmask, gw);
 
   /* call user specified initialization function for netif */

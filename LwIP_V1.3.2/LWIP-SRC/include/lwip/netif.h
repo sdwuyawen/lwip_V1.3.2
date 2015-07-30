@@ -58,6 +58,7 @@ extern "C" {
 
 /** must be the maximum of all used hardware address lengths
     across all types of interfaces in use */
+/* 最大物理地址长度 */
 #define NETIF_MAX_HWADDR_LEN 6U
 
 /** TODO: define the use (where, when, whom) of netif flags */
@@ -66,6 +67,8 @@ extern "C" {
  * a software flag used to control whether this network
  * interface is enabled and processes traffic.
  */
+/* 网络接口的属性和状态 */
+/* 网络接口被上层使能 */
 #define NETIF_FLAG_UP           0x01U
 /** if set, the netif has broadcast capability */
 #define NETIF_FLAG_BROADCAST    0x02U
@@ -75,10 +78,13 @@ extern "C" {
 #define NETIF_FLAG_DHCP         0x08U
 /** if set, the interface has an active link
  *  (set by the network interface driver) */
+/* 网络接口链路层是否已经使能 */
 #define NETIF_FLAG_LINK_UP      0x10U
 /** if set, the netif is an device using ARP */
+/* 网络接口支持ARP */
 #define NETIF_FLAG_ETHARP       0x20U
 /** if set, the netif has IGMP capability */
+/* 网络接口支持IGMP */
 #define NETIF_FLAG_IGMP         0x40U
 
 /** Generic data structure used for all lwIP network interfaces.
@@ -87,24 +93,34 @@ extern "C" {
 
 struct netif {
   /** pointer to next in linked list */
+	/* 指向下一个netif节点 */
   struct netif *next;
 
   /** IP address configuration in network byte order */
+	/* 网络字节序的IP地址、子网掩码、网关 */
   struct ip_addr ip_addr;
   struct ip_addr netmask;
   struct ip_addr gw;
 
   /** This function is called by the network device driver
    *  to pass a packet up the TCP/IP stack. */
+	/* 设置为ethernet_input，由网卡驱动接收到一个以太网帧时调用
+	 * 把数据传递给协议栈上层
+	 */
   err_t (* input)(struct pbuf *p, struct netif *inp);
   /** This function is called by the IP module when it wants
    *  to send a packet on the interface. This function typically
    *  first resolves the hardware address, then sends the packet. */
+	/* 设置为etharp_output。由IP层调用，发送IP数据包
+	 * 该函数首先解析MAX地址，然后发送待发送的数据包
+	 * 接收上层的IP数据包，并封装为以太网帧，然后调用linkoutput把以太网帧发送出去
+	 */
   err_t (* output)(struct netif *netif, struct pbuf *p,
        struct ip_addr *ipaddr);
   /** This function is called by the ARP module when it wants
    *  to send a packet on the interface. This function outputs
    *  the pbuf as-is on the link medium. */
+	/* 设置为low_level_output。实现底层数据包发送函数。 */
   err_t (* linkoutput)(struct netif *netif, struct pbuf *p);
 #if LWIP_NETIF_STATUS_CALLBACK
   /** This function is called when the netif state is set to up or down
@@ -118,6 +134,7 @@ struct netif {
 #endif /* LWIP_NETIF_LINK_CALLBACK */
   /** This field can be set by the device driver and could point
    *  to state information for the device. */
+	/* 可以由底层使用的数据 */
   void *state;
 #if LWIP_DHCP
   /** the DHCP client state information for this netif */
@@ -132,16 +149,22 @@ struct netif {
   char*  hostname;
 #endif /* LWIP_NETIF_HOSTNAME */
   /** maximum transfer unit (in bytes) */
+	/* MTU，最大传输单元 */
   u16_t mtu;
   /** number of bytes used in hwaddr */
+	/* MAC地址长度 */
   u8_t hwaddr_len;
   /** link level hardware address of this interface */
+	/* MAC地址 */
   u8_t hwaddr[NETIF_MAX_HWADDR_LEN];
   /** flags (see NETIF_FLAG_ above) */
+	/* 该接口的状态、属性 */
   u8_t flags;
   /** descriptive abbreviation */
+	/* 接口名字 */
   char name[2];
   /** number of this interface */
+	/* 接口的编号 */
   u8_t num;
 #if LWIP_SNMP
   /** link type (from "snmp_ifType" enum from snmp.h) */
@@ -169,7 +192,9 @@ struct netif {
 #endif /* LWIP_NETIF_HWADDRHINT */
 #if ENABLE_LOOPBACK
   /* List of packets to be queued for ourselves. */
+	/* 环回接口发送给自己的数据包的第一个pbuf */
   struct pbuf *loop_first;
+	/* 环回接口发送给自己的数据包的最后一个pbuf */
   struct pbuf *loop_last;
 #if LWIP_LOOPBACK_MAX_PBUFS
   u16_t loop_cnt_current;

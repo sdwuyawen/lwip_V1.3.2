@@ -261,6 +261,9 @@ low_level_input(struct netif *netif)
  *
  * @param netif the lwip network interface structure for this ethernetif
  */
+/* 由设备驱动调用，内部会调用netif->input即ethernet_input()，
+ * 把数据传递给协议栈上层
+ */
 void ethernetif_input(struct netif *netif)
 {
 //  struct ethernetif *ethernetif;

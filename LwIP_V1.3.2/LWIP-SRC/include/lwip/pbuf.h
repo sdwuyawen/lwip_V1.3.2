@@ -40,13 +40,19 @@
 extern "C" {
 #endif
 
+/* 传输层首部长度 */
 #define PBUF_TRANSPORT_HLEN 20
+/* 网络层首部长度 */
 #define PBUF_IP_HLEN        20
 
 typedef enum {
+	/* 传输层，预留20字节 */
   PBUF_TRANSPORT,
+	/* 网络层，预留20字节 */
   PBUF_IP,
+	/* 链路，预留14字节 */
   PBUF_LINK,
+	/* 不预留首部空间 */
   PBUF_RAW
 } pbuf_layer;
 
@@ -75,9 +81,11 @@ struct pbuf {
    * For non-queue packet chains this is the invariant:
    * p->tot_len == p->len + (p->next? p->next->tot_len: 0)
    */
+	/* 当前pbuf和后续所有pbuf中包含的数据总长度 */
   u16_t tot_len;
   
   /** length of this buffer */
+	/* 当前pbuf中包含数据长度 */
   u16_t len;  
 
   /** pbuf_type as u8_t instead of enum to save space */
