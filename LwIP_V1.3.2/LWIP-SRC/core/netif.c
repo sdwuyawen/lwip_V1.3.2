@@ -149,11 +149,16 @@ netif_add(struct netif *netif, struct ip_addr *ipaddr, struct ip_addr *netmask,
   netif_set_addr(netif, ipaddr, netmask, gw);
 
   /* call user specified initialization function for netif */
+	/* 调用init() = ethernetif_init()，会设置
+	 * netif->output = etharp_output
+	 * netif->linkoutput = low_level_output
+	 */
   if (init(netif) != ERR_OK) {
     return NULL;
   }
 
   /* add this netif to the list */
+	/* 把当前netif插入netif_list链表头 */
   netif->next = netif_list;
   netif_list = netif;
   snmp_inc_iflist();
@@ -173,6 +178,8 @@ netif_add(struct netif *netif, struct ip_addr *ipaddr, struct ip_addr *netmask,
   LWIP_DEBUGF(NETIF_DEBUG, (" gw "));
   ip_addr_debug_print(NETIF_DEBUG, gw);
   LWIP_DEBUGF(NETIF_DEBUG, ("\n"));
+	
+	/* 返回netif结构指针 */
   return netif;
 }
 
@@ -556,20 +563,27 @@ void netif_set_link_callback(struct netif *netif, void (* link_callback)(struct 
  * @return ERR_OK if the packet has been sent
  *         ERR_MEM if the pbuf used to copy the packet couldn't be allocated
  */
+/* 把pbuf挂到netif的loop_first链表上 */
 err_t
 netif_loop_output(struct netif *netif, struct pbuf *p,
        struct ip_addr *ipaddr)
 {
+	/* pbuf链表首部 */
   struct pbuf *r;
   err_t err;
+	/* pbuf链表尾部 */
   struct pbuf *last;
 #if LWIP_LOOPBACK_MAX_PBUFS
   u8_t clen = 0;
 #endif /* LWIP_LOOPBACK_MAX_PBUFS */
+	
+	/* 申请临界保护变量 */
   SYS_ARCH_DECL_PROTECT(lev);
+	/* (void)x,防止编译器警告未使用的变量 */
   LWIP_UNUSED_ARG(ipaddr);
 
   /* Allocate a new pbuf */
+	/* 申请一个pbuf，存放待发送的数据包 */
   r = pbuf_alloc(PBUF_LINK, p->tot_len, PBUF_RAM);
   if (r == NULL) {
     return ERR_MEM;
@@ -587,7 +601,9 @@ netif_loop_output(struct netif *netif, struct pbuf *p,
 #endif /* LWIP_LOOPBACK_MAX_PBUFS */
 
   /* Copy the whole pbuf queue p into the single pbuf r */
+	/* 把要发送的pbuf链表拷贝到新申请的pbuf中 */
   if ((err = pbuf_copy(r, p)) != ERR_OK) {
+		/* 拷贝失败，则释放新申请的pbuf */
     pbuf_free(r);
     r = NULL;
     return err;
@@ -597,17 +613,32 @@ netif_loop_output(struct netif *netif, struct pbuf *p,
      netif_poll(). */
 
   /* let last point to the last pbuf in chain r */
+	/* 新申请的是PBUF_RAM类型的pbuf，只有一个pbuf节点，为什么还要找到新申请的pbuf最后一个节点? */
   for (last = r; last->next != NULL; last = last->next);
 
+	/* 进入临界区 */
   SYS_ARCH_PROTECT(lev);
+	/* 把新申请的pbuf挂到netif的loop_first链表 */
+	/* 如果loop_first不为空，则把pbuf挂到loop_first链表尾部 */
   if(netif->loop_first != NULL) {
     LWIP_ASSERT("if first != NULL, last must also be != NULL", netif->loop_last != NULL);
+		/* loop_last指向链表尾部，这个指针可以避免在插入链表尾部时重新遍历链表
+		 * 把r挂到loop_first尾部
+		 */
+		/* 链表尾部节点的next指针pbuf */
     netif->loop_last->next = r;
-    netif->loop_last = last;
-  } else {
-    netif->loop_first = r;
+		/* 调整链表尾指针 */
     netif->loop_last = last;
   }
+	/* loop_first链表空，则需要设置头指针loop_first */
+	else {
+		/* loop_first链表头指针loop_first指向pbuf */
+    netif->loop_first = r;
+		/* loop_first链表尾指针loop_last指向pbuf */
+    netif->loop_last = last;
+		/* loop_first链表空，不需要调整尾节点的next指针 */
+  }
+	/* 退出临界区 */
   SYS_ARCH_UNPROTECT(lev);
 
 #if LWIP_NETIF_LOOPBACK_MULTITHREADING

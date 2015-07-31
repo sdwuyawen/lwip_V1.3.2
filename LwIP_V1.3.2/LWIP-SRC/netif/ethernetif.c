@@ -60,6 +60,7 @@
 //#include "delay.h"
 
 /* Define those to better describe your network interface. */
+/* 定义以太网网卡的名字 */
 #define IFNAME0 'e'
 #define IFNAME1 'n'
 
@@ -74,6 +75,9 @@ u8 lwip_buf[1518 - 4];
  * Keeping the ethernet address of the MAC in this struct is not necessary
  * as it is already kept in the struct netif.
  * But this is only an example, anyway...
+ */
+/* 用于网卡驱动私有数据，这里使用struct eth_addr *ethaddr仅是为了演示驱动私有数据的使用
+ * 并没有实际意义
  */
 struct ethernetif {
   struct eth_addr *ethaddr;
@@ -322,12 +326,17 @@ void ethernetif_input(struct netif *netif)
  *         ERR_MEM if private data couldn't be allocated
  *         any other err_t on error
  */
+/* 作为默认的以太网接口初始化函数，在netif_add()时被调用
+ * 会调用low_level_init()完成网卡底层初始化
+ */
 err_t ethernetif_init(struct netif *netif)
 {
+	/* 定义驱动私有数据指针 */
   struct ethernetif *ethernetif;
 
   LWIP_ASSERT("netif != NULL", (netif != NULL));
-    
+
+	/* 申请驱动私有数据空间 */
   ethernetif = mem_malloc(sizeof(struct ethernetif));
   if (ethernetif == NULL) {
     LWIP_DEBUGF(NETIF_DEBUG, ("ethernetif_init: out of memory\n"));
@@ -346,19 +355,25 @@ err_t ethernetif_init(struct netif *netif)
    */
   NETIF_INIT_SNMP(netif, snmp_ifType_ethernet_csmacd, LINK_SPEED_OF_YOUR_NETIF_IN_BPS);
 
+	/* 把netif中的state字段指向驱动私有数据 */
   netif->state = ethernetif;
+	/* 设置netif中的名字字段 */
   netif->name[0] = IFNAME0;
   netif->name[1] = IFNAME1;
   /* We directly use etharp_output() here to save a function call.
    * You can instead declare your own function an call etharp_output()
    * from it if you have to do some checks before sending (e.g. if link
    * is available...) */
+	/* IP数据包输出函数 */
   netif->output = etharp_output;
+	/* 链路层数据包输出函数，发送以太网帧的方法 */
   netif->linkoutput = low_level_output;
   
+	/* 设置私有数据的某字段的值 */
   ethernetif->ethaddr = (struct eth_addr *)&(netif->hwaddr[0]);
   
   /* initialize the hardware */
+	/* 调用网卡底层初始化函数 */
   return low_level_init(netif);
 
 }
