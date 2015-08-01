@@ -57,8 +57,13 @@ loopif_init(struct netif *netif)
    */
   NETIF_INIT_SNMP(netif, snmp_ifType_softwareLoopback, 0);
 
+	/* 设置环回接口的名字 */
   netif->name[0] = 'l';
   netif->name[1] = 'o';
+	/* 设置环回接口的输出函数 */
+	/* netif_loop_output()把pbuf挂到netif的loop_first链表上
+	 * 用户函数主动调用netif_poll()，把loop_first链表上的数据包提交到IP层
+	 */
   netif->output = netif_loop_output;
   return ERR_OK;
 }

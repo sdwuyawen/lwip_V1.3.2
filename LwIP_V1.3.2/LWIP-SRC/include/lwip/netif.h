@@ -112,7 +112,7 @@ struct netif {
    *  to send a packet on the interface. This function typically
    *  first resolves the hardware address, then sends the packet. */
 	/* 设置为etharp_output。由IP层调用，发送IP数据包
-	 * 该函数首先解析MAX地址，然后发送待发送的数据包
+	 * 该函数首先解析MAC地址，然后发送待发送的数据包
 	 * 接收上层的IP数据包，并封装为以太网帧，然后调用linkoutput把以太网帧发送出去
 	 */
   err_t (* output)(struct netif *netif, struct pbuf *p,

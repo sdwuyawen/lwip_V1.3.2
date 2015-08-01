@@ -49,6 +49,10 @@ void LWIP_Polling(void)
 		 * ethernetif_input() -> ethernet_input()
 		 */
 		ethernetif_input(&enc28j60_netif);	//轮询以太网接口
+		
+		/* 轮询环回接口，把loop_first上数据包向
+		 * 上层IP层提交
+		 */
 		netif_poll(&loop_netif);						//轮询环回接口
 	}
 	if(timer_expired(&last_tcp_time,TCP_TMR_INTERVAL/MS_PER_CLOCKTICK))		//TCP处理定时器处理函数
@@ -281,7 +285,7 @@ void tcpserver_init(void)
 }
 
 
-
+/* 环回接口的回调函数 */
 static err_t loopclient_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
 {
 
@@ -294,34 +298,41 @@ static err_t loopclient_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err
 	/* This lets the stack advertise a larger window, so more data can be received*/
 	char *data = (char *)p->payload;
 	int length = p->len;
+	/* 通知协议栈更新接收窗口 */
 	tcp_recved(pcb, p->tot_len);
 
-    printf("LoopClient Get Data::");
-    while(length-- >0) 
+	printf("LoopClient Get Data:");
+	while(length-- >0) 
 	{
 		printf("%c", (int)(*data++));
 	}
 		
 //    OSTimeDly(50);
 //    tcp_write(pcb, p->payload, p->len, 1);
+		/* 释放接收到的pbuf */
     pbuf_free(p);
-   } 
+	} 
   else if (err == ERR_OK) 
   {
     return tcp_close(pcb);
   }
   return ERR_OK;
 }
-unsigned char loopdata[]="Loop Interface Test!!\n";
+
+/* 环回接口的客户端连接回调函数。当与服务器建立连接后，该函数会被调用 */
+unsigned char loopdata[]="Loop Interface Test!!\r\n";
 static err_t loopclient_connect(void *arg, struct tcp_pcb *tpcb, err_t err)
 {
-  printf("TCP loop connected\n");
+  printf("TCP loop connected\r\n");
+	/* 注册接收回调函数 */
   tcp_recv(tpcb, loopclient_recv);
 //  OSTimeDly(10);
+	/* 向服务器发送数据 */
   tcp_write(tpcb,loopdata,sizeof(loopdata)-1, 1);
   return ERR_OK;
 }
 
+/* 环回接口客户端初始化 */
 void loopclient_init(void)
 {
   struct tcp_pcb *pcb;
@@ -332,8 +343,10 @@ void loopclient_init(void)
 
   /* Assign to the new pcb a local IP address and a port number */
   /* Using IP_ADDR_ANY allow the pcb to be used by any local interface */
-  tcp_bind(pcb, IP_ADDR_ANY, 7);       
+	/* 为客户端绑定一个本地端口 */
+  tcp_bind(pcb, IP_ADDR_ANY, 7);
 
+	/* 连接至服务器ipaddr:6060，连接成功后回调loopclient_connect */
   tcp_connect(pcb,&ipaddr,6060,loopclient_connect);
 }
 
@@ -397,7 +410,8 @@ void LwIP_APP_Init(void)
 						&netmask, 
 						&gw, 
 						NULL, 
-						loopif_init,NULL);
+						loopif_init,			/* 环回接口初始化函数 */
+						NULL);
 	netif_set_up(&loop_netif);
 	 
 	/*

@@ -618,7 +618,7 @@ netif_loop_output(struct netif *netif, struct pbuf *p,
 
 	/* 进入临界区 */
   SYS_ARCH_PROTECT(lev);
-	/* 把新申请的pbuf挂到netif的loop_first链表 */
+	/* 把新申请的pbuf链表整体挂到netif的loop_first链表 */
 	/* 如果loop_first不为空，则把pbuf挂到loop_first链表尾部 */
   if(netif->loop_first != NULL) {
     LWIP_ASSERT("if first != NULL, last must also be != NULL", netif->loop_last != NULL);
@@ -655,17 +655,24 @@ netif_loop_output(struct netif *netif, struct pbuf *p,
  * netif_loop_output() are put on a list that is passed to netif->input() by
  * netif_poll().
  */
+/* 把netif的loop_first链表上的所有数据包提交给IP层 */
 void
 netif_poll(struct netif *netif)
 {
   struct pbuf *in;
+	
+	/* 申请临界保护变量 */
   SYS_ARCH_DECL_PROTECT(lev);
 
   do {
     /* Get a packet from the list. With SYS_LIGHTWEIGHT_PROT=1, this is protected */
+		/* 进入临界区 */
     SYS_ARCH_PROTECT(lev);
+		/* 获取loop_first指向的第一个pbuf */
     in = netif->loop_first;
+		/* loop_first链表不为空，则进行数据包向IP层的提交 */
     if(in != NULL) {
+			/* 指向数据包的最后一个pbuf */
       struct pbuf *in_end = in;
 #if LWIP_LOOPBACK_MAX_PBUFS
       u8_t clen = pbuf_clen(in);
@@ -674,34 +681,57 @@ netif_poll(struct netif *netif)
         ((netif->loop_cnt_current - clen) < netif->loop_cnt_current));
       netif->loop_cnt_current -= clen;
 #endif /* LWIP_LOOPBACK_MAX_PBUFS */
+			
+			/* 找到一个数据包的最后一个pbuf
+			 * loop_first链表上可能挂了多个数据包的pbuf。
+			 * 当一个数据包的len == tot_len时，表示这个pbuf是
+			 * 一个数据包的结束
+			 */
       while(in_end->len != in_end->tot_len) {
         LWIP_ASSERT("bogus pbuf: len != tot_len but next == NULL!", in_end->next != NULL);
         in_end = in_end->next;
       }
+			
+			/* 从loop_first链表中删除当前pbuf链表
+			 * 如果当前pbuf链表的最后一个节点是loop_first链表的最后一个节点
+			 * 则loop_first链表只包含当前一个数据包
+			 * 删除当前节点后链表头指针和链表尾指针都需要设为NULL
+			 */
       /* 'in_end' now points to the last pbuf from 'in' */
       if(in_end == netif->loop_last) {
         /* this was the last pbuf in the list */
         netif->loop_first = netif->loop_last = NULL;
-      } else {
+      }
+			/* loop_first链表还有其他pbuf链表，则调整链表头指针 */
+			else {
         /* pop the pbuf off the list */
         netif->loop_first = in_end->next;
         LWIP_ASSERT("should not be null since first != last!", netif->loop_first != NULL);
       }
+			/* 待提交的pbuf链表最后一个节点的next指针设为NULL，表示pbuf链表结束 */
       /* De-queue the pbuf from its successors on the 'loop_' list. */
       in_end->next = NULL;
     }
+		/* 退出临界段 */
     SYS_ARCH_UNPROTECT(lev);
 
+		/* 如果待提交的数据包不为空，则调用IP层的输入函数，提交数据包 */
     if(in != NULL) {
       /* loopback packets are always IP packets! */
+			/* 向IP层提交待提交的数据包，提交成功时，IP层会释放该pbuf链表
+			 * 提交失败时，则主动释放该pbuf链表
+			 */
       if(ip_input(in, netif) != ERR_OK) {
         pbuf_free(in);
       }
       /* Don't reference the packet any more! */
+			/* 待提交的pbuf指针设为NULL */
       in = NULL;
     }
   /* go on while there is a packet on the list */
-  } while(netif->loop_first != NULL);
+  }
+	/* 循环提交loop_first链表上的所有pbuf链表 */
+	while(netif->loop_first != NULL);
 }
 
 #if !LWIP_NETIF_LOOPBACK_MULTITHREADING
