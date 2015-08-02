@@ -342,6 +342,7 @@
 /**
  * ARP_TABLE_SIZE: Number of active MAC-IP address pairs cached.
  */
+/* ARPª∫¥Ê±Ì¥Û–° */
 #ifndef ARP_TABLE_SIZE
 #define ARP_TABLE_SIZE                  10
 #endif

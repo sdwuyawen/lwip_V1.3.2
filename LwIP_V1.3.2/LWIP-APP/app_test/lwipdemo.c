@@ -59,8 +59,11 @@ void LWIP_Polling(void)
 	{
 		tcp_tmr();
 	}
+	
+	/* ARP表更新定时器，必须每5s调用一次 */
 	if(timer_expired(&last_arp_time,ARP_TMR_INTERVAL/MS_PER_CLOCKTICK))		//ARP处理定时器
 	{
+		/* 删除存在时间大于20min的ARP表项，处理发出的ARP请求等 */
 		etharp_tmr();
 	}
 	if(timer_expired(&last_ipreass_time,IP_TMR_INTERVAL/MS_PER_CLOCKTICK))//IP重新组装定时器

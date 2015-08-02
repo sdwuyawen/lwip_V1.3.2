@@ -52,6 +52,7 @@ extern "C" {
 #define ETH_PAD_SIZE          0
 #endif
 
+/* 以太网地址长度 */
 #ifndef ETHARP_HWADDR_LEN
 #define ETHARP_HWADDR_LEN     6
 #endif
@@ -59,11 +60,14 @@ extern "C" {
 #ifdef PACK_STRUCT_USE_INCLUDES
 #  include "arch/bpstruct.h"
 #endif
+	
+/* 以太网地址结构体，使用__packed禁止自动对齐 */
 PACK_STRUCT_BEGIN
 struct eth_addr {
   PACK_STRUCT_FIELD(u8_t addr[ETHARP_HWADDR_LEN]);
 } PACK_STRUCT_STRUCT;
 PACK_STRUCT_END
+
 #ifdef PACK_STRUCT_USE_INCLUDES
 #  include "arch/epstruct.h"
 #endif
@@ -71,13 +75,18 @@ PACK_STRUCT_END
 #ifdef PACK_STRUCT_USE_INCLUDES
 #  include "arch/bpstruct.h"
 #endif
+
+/* 定义以太网帧首部，使用__packed禁止自动对齐 */
 PACK_STRUCT_BEGIN
 struct eth_hdr {
 #if ETH_PAD_SIZE
   PACK_STRUCT_FIELD(u8_t padding[ETH_PAD_SIZE]);
 #endif
+	/* 目的MAC地址，6字节 */
   PACK_STRUCT_FIELD(struct eth_addr dest);
+	/* 源MAC地址，6字节 */
   PACK_STRUCT_FIELD(struct eth_addr src);
+	/* 帧类型，2字节 */
   PACK_STRUCT_FIELD(u16_t type);
 } PACK_STRUCT_STRUCT;
 PACK_STRUCT_END
@@ -85,6 +94,7 @@ PACK_STRUCT_END
 #  include "arch/epstruct.h"
 #endif
 
+/* 以太网帧首部长度 */
 #define SIZEOF_ETH_HDR (14 + ETH_PAD_SIZE)
 
 #if ETHARP_SUPPORT_VLAN
@@ -110,16 +120,26 @@ PACK_STRUCT_END
 #ifdef PACK_STRUCT_USE_INCLUDES
 #  include "arch/bpstruct.h"
 #endif
+
+/* ARP数据包结构体，struct etharp_hdr，禁止自动对齐 */
 PACK_STRUCT_BEGIN
 /** the ARP message */
 struct etharp_hdr {
+	/* 硬件类型，2字节 */
   PACK_STRUCT_FIELD(u16_t hwtype);
+	/* 协议类型，2字节 */
   PACK_STRUCT_FIELD(u16_t proto);
+	/* 硬件地址长度+协议地址长度，2字节 */
   PACK_STRUCT_FIELD(u16_t _hwlen_protolen);
+	/* 操作码，2字节 */
   PACK_STRUCT_FIELD(u16_t opcode);
+	/* 源MAC地址 */
   PACK_STRUCT_FIELD(struct eth_addr shwaddr);
+	/* 源IP地址 */
   PACK_STRUCT_FIELD(struct ip_addr2 sipaddr);
+	/* 目的MAC地址 */
   PACK_STRUCT_FIELD(struct eth_addr dhwaddr);
+	/* 目的IP地址 */
   PACK_STRUCT_FIELD(struct ip_addr2 dipaddr);
 } PACK_STRUCT_STRUCT;
 PACK_STRUCT_END
@@ -127,12 +147,16 @@ PACK_STRUCT_END
 #  include "arch/epstruct.h"
 #endif
 
+/* ARP数据包长度 */
 #define SIZEOF_ETHARP_HDR 28
+/* ARP数据包的以太网帧长度 */
 #define SIZEOF_ETHARP_PACKET (SIZEOF_ETH_HDR + SIZEOF_ETHARP_HDR)
 
 /** 5 seconds period */
+/* ARP定时器周期 */
 #define ARP_TMR_INTERVAL 5000
 
+/* 以太网帧的帧类型字段 */
 #define ETHTYPE_ARP       0x0806
 #define ETHTYPE_IP        0x0800
 #define ETHTYPE_VLAN      0x8100
@@ -140,6 +164,7 @@ PACK_STRUCT_END
 #define ETHTYPE_PPPOE     0x8864  /* PPP Over Ethernet Session Stage */
 
 /** ARP message types (opcodes) */
+/* ARP操作码 */
 #define ARP_REQUEST 1
 #define ARP_REPLY   2
 
@@ -147,6 +172,7 @@ PACK_STRUCT_END
 /** struct for queueing outgoing packets for unknown address
   * defined here to be accessed by memp.h
   */
+/* 等待ARP请求完成后发送的数据包链表 */
 struct etharp_q_entry {
   struct etharp_q_entry *next;
   struct pbuf *p;

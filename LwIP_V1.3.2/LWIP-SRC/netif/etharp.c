@@ -65,6 +65,7 @@
  *  for ARP_TMR_INTERVAL = 5000, this is
  *  (240 * 5) seconds = 20 minutes.
  */
+/* ARP表稳定表项的最大生存时间，240 * 5 = 20min */
 #define ARP_MAXAGE 240
 /** the time an ARP entry stays pending after first request,
  *  for ARP_TMR_INTERVAL = 5000, this is
@@ -73,6 +74,7 @@
  *  @internal Keep this number at least 2, otherwise it might
  *  run out instantly if the timeout occurs directly after a request.
  */
+/* ARP表等待ARP回复表项的最大等待时间，2 * 5 = 10s */
 #define ARP_MAXPENDING 2
 
 #define HWTYPE_ETHERNET 1
@@ -83,28 +85,39 @@
 #define ARPH_HWLEN_SET(hdr, len) (hdr)->_hwlen_protolen = htons(ARPH_PROTOLEN(hdr) | ((len) << 8))
 #define ARPH_PROTOLEN_SET(hdr, len) (hdr)->_hwlen_protolen = htons((len) | (ARPH_HWLEN(hdr) << 8))
 
+/* ARP缓存表中一个表项的状态 */
 enum etharp_state {
   ETHARP_STATE_EMPTY = 0,
   ETHARP_STATE_PENDING,
   ETHARP_STATE_STABLE
 };
 
+/* 每个ARP表项 */
 struct etharp_entry {
 #if ARP_QUEUEING
   /** 
    * Pointer to queue of pending outgoing packets on this ARP entry.
    */
+	/* ARP地址解析时，等待发送的数据包链表 */
   struct etharp_q_entry *q;
 #endif
+	/* IP地址 */
   struct ip_addr ipaddr;
+	/* MAC地址 */
   struct eth_addr ethaddr;
+	/* 当前ARP表项的状态 */
   enum etharp_state state;
+	/* 该ARP表项的存活时间 */
   u8_t ctime;
+	/* 对应的网络接口 */
   struct netif *netif;
 };
 
+/* 广播MAC地址 */
 const struct eth_addr ethbroadcast = {{0xff,0xff,0xff,0xff,0xff,0xff}};
+/* 全0MAC地址，用于ARP请求的ARP包中目的MAC地址 */
 const struct eth_addr ethzero = {{0,0,0,0,0,0}};
+/* arp缓存表 */
 static struct etharp_entry arp_table[ARP_TABLE_SIZE];
 #if !LWIP_NETIF_HWADDRHINT
 static u8_t etharp_cached_entry;
@@ -139,17 +152,23 @@ static err_t update_arp_entry(struct netif *netif, struct ip_addr *ipaddr, struc
  *
  * @param q a qeueue of etharp_q_entry's to free
  */
+/* 释放一个ARP表项中待发送数据包队列 */
 static void
 free_etharp_q(struct etharp_q_entry *q)
 {
+	/* 待处理节点 */
   struct etharp_q_entry *r;
   LWIP_ASSERT("q != NULL", q != NULL);
   LWIP_ASSERT("q->p != NULL", q->p != NULL);
+	/* 遍历链表*/
   while (q) {
     r = q;
+		/* 获得下一个节点 */
     q = q->next;
     LWIP_ASSERT("r->p != NULL", (r->p != NULL));
+		/* 释放一个pbuf链表 */
     pbuf_free(r->p);
+		/* 释放struct etharp_q_entry结构 */
     memp_free(MEMP_ARP_QUEUE, r);
   }
 }
@@ -161,6 +180,7 @@ free_etharp_q(struct etharp_q_entry *q)
  * This function should be called every ETHARP_TMR_INTERVAL microseconds (5 seconds),
  * in order to expire entries in the ARP table.
  */
+/* ARP表项定时处理，被应用层5s调用一次 */
 void
 etharp_tmr(void)
 {
@@ -168,8 +188,13 @@ etharp_tmr(void)
 
   LWIP_DEBUGF(ETHARP_DEBUG, ("etharp_timer\n"));
   /* remove expired entries from the ARP table */
+	/* 遍历整个ARP表 */
   for (i = 0; i < ARP_TABLE_SIZE; ++i) {
+		/* 表项生存时间+1，即增加5s */
     arp_table[i].ctime++;
+		/* 稳定状态表项，存在时间大于等于20min
+		 * 或者等待ARP回复的表项，存在时间大于等于10s
+		 */
     if (((arp_table[i].state == ETHARP_STATE_STABLE) &&
          (arp_table[i].ctime >= ARP_MAXAGE)) ||
         ((arp_table[i].state == ETHARP_STATE_PENDING)  &&
@@ -181,15 +206,19 @@ etharp_tmr(void)
       /* remove from SNMP ARP index tree */
       snmp_delete_arpidx_tree(arp_table[i].netif, &arp_table[i].ipaddr);
 #if ARP_QUEUEING
+			/* 如果该表项的待发送IP包队列不为空，则释放这些数据包 */
       /* and empty packet queue */
       if (arp_table[i].q != NULL) {
         /* remove all queued packets */
         LWIP_DEBUGF(ETHARP_DEBUG, ("etharp_timer: freeing entry %"U16_F", packet queue %p.\n", (u16_t)i, (void *)(arp_table[i].q)));
-        free_etharp_q(arp_table[i].q);
+        /* 释放待发送的多个pbuf链表和struct etharp_q_entry链表节点占用的内存 */
+				free_etharp_q(arp_table[i].q);
+				/* 该ARP表项的待发送IP队列设置为空 */
         arp_table[i].q = NULL;
       }
 #endif
-      /* recycle entry for re-use */      
+      /* recycle entry for re-use */
+			/* ARP表项设置为空闲 */
       arp_table[i].state = ETHARP_STATE_EMPTY;
     }
 #if ARP_QUEUEING
@@ -1039,6 +1068,16 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
  *         ERR_MEM if the ARP packet couldn't be allocated
  *         any other err_t on failure
  */
+/* 发送一个ARP包
+ * netif是要使用的网络接口
+ * ethsrc_addr是以太网帧中的源MAC地址
+ * ethdst_addr是以太网帧中的目的MAC地址
+ * hwsrc_addr是ARP数据包中的源MAC地址
+ * ipsrc_addr是ARP数据包中的源IP地址
+ * hwdst_addr是ARP数据包中的目的MAC地址
+ * ipdst_addr是ARP数据包中的目的IP地址
+ * opcode是ARP数据包中的操作码，1是ARP请求，2是ARP回复
+ */
 #if !LWIP_AUTOIP
 static
 #endif /* LWIP_AUTOIP */
@@ -1052,15 +1091,21 @@ etharp_raw(struct netif *netif, const struct eth_addr *ethsrc_addr,
   struct pbuf *p;
   err_t result = ERR_OK;
   u8_t k; /* ARP entry index */
+	/* 以太网帧首部指针 */
   struct eth_hdr *ethhdr;
+	/* ARP数据包指针 */
   struct etharp_hdr *hdr;
 #if LWIP_AUTOIP
   const u8_t * ethdst_hwaddr;
 #endif /* LWIP_AUTOIP */
 
   /* allocate a pbuf for the outgoing ARP request packet */
+	/* 申请以太网帧+ARP数据包大小的内存，不足60字节
+	 * 由网卡驱动netif->linkoutput()完成填充，实际是enc28j60自动填充
+	 */
   p = pbuf_alloc(PBUF_RAW, SIZEOF_ETHARP_PACKET, PBUF_RAM);
   /* could allocate a pbuf for an ARP request? */
+	/* 申请失败，则返回错误信息 */
   if (p == NULL) {
     LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_SERIOUS,
       ("etharp_raw: could not allocate pbuf for ARP request.\n"));
@@ -1070,9 +1115,12 @@ etharp_raw(struct netif *netif, const struct eth_addr *ethsrc_addr,
   LWIP_ASSERT("check that first pbuf can hold struct etharp_hdr",
               (p->len >= SIZEOF_ETHARP_PACKET));
 
+	/* 以太网帧首部指向pbuf的payload */
   ethhdr = p->payload;
+	/* ARP数据包首部指针 */
   hdr = (struct etharp_hdr *)((u8_t*)ethhdr + SIZEOF_ETH_HDR);
   LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_raw: sending raw ARP packet.\n"));
+	/* 填写ARP数据包的opcode，网络字节序 */
   hdr->opcode = htons(opcode);
 
   LWIP_ASSERT("netif->hwaddr_len must be the same as ETHARP_HWADDR_LEN for etharp!",
@@ -1084,6 +1132,9 @@ etharp_raw(struct netif *netif, const struct eth_addr *ethsrc_addr,
   ethdst_hwaddr = ((netif->autoip != NULL) && (netif->autoip->state != AUTOIP_STATE_OFF)) ? (u8_t*)(ethbroadcast.addr) : ethdst_addr->addr;
 #endif /* LWIP_AUTOIP */
   /* Write MAC-Addresses (combined loop for both headers) */
+	/* 填写ARP数据包的源MAC，目的MAC
+	 * 填写以太网帧的源MAC，目的MAC
+	 */
   while(k > 0) {
     k--;
     /* Write the ARP MAC-Addresses */
@@ -1097,20 +1148,30 @@ etharp_raw(struct netif *netif, const struct eth_addr *ethsrc_addr,
 #endif /* LWIP_AUTOIP */
     ethhdr->src.addr[k]  = ethsrc_addr->addr[k];
   }
+	/* 填写ARP数据包的源IP，目的IP */
   hdr->sipaddr = *(struct ip_addr2 *)ipsrc_addr;
   hdr->dipaddr = *(struct ip_addr2 *)ipdst_addr;
 
+	/* 填写ARP数据包的硬件类型 */
   hdr->hwtype = htons(HWTYPE_ETHERNET);
+	/* 填写ARP数据包的协议类型 */
   hdr->proto = htons(ETHTYPE_IP);
   /* set hwlen and protolen together */
+	/* 设置ARP数据包的硬件地址长度、协议地址长度 */
   hdr->_hwlen_protolen = htons((ETHARP_HWADDR_LEN << 8) | sizeof(struct ip_addr));
 
+	/* 设置以太网帧的类型 */
   ethhdr->type = htons(ETHTYPE_ARP);
+	
   /* send ARP query */
+	/* 调用底层以太网帧发送函数，把pbuf通过netif发送出去 */
   result = netif->linkoutput(netif, p);
+	/* 更新已发送数据包数 */
   ETHARP_STATS_INC(etharp.xmit);
   /* free ARP query packet */
+	/* 发送完成，释放申请的pbuf */
   pbuf_free(p);
+	/* pbuf指针指向NULL */
   p = NULL;
   /* could not allocate pbuf for ARP request */
 
@@ -1126,6 +1187,7 @@ etharp_raw(struct netif *netif, const struct eth_addr *ethsrc_addr,
  *         ERR_MEM if the ARP packet couldn't be allocated
  *         any other err_t on failure
  */
+/* 发送一个ARP请求包 */
 err_t
 etharp_request(struct netif *netif, struct ip_addr *ipaddr)
 {
