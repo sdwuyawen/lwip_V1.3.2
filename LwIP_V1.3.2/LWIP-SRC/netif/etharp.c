@@ -1087,14 +1087,19 @@ etharp_output(struct netif *netif, struct pbuf *q, struct ip_addr *ipaddr)
  * - ERR_ARG Non-unicast address given, those will not appear in ARP cache.
  *
  */
+/* 查找单播地址ipaddr对应的MAC地址，并向该MAC地址发送数据包 */
 err_t
 etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
 {
+	/* 源MAC地址 */
   struct eth_addr * srcaddr = (struct eth_addr *)netif->hwaddr;
   err_t result = ERR_MEM;
   s8_t i; /* ARP entry index */
 
   /* non-unicast address? */
+	/* 判断目的IP地址是否是广播、多播、或者是0。
+	 * 如果是任何一种，则返回错误信息
+	 */
   if (ip_addr_isbroadcast(ipaddr, netif) ||
       ip_addr_ismulticast(ipaddr) ||
       ip_addr_isany(ipaddr)) {
@@ -1106,10 +1111,17 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
 #if LWIP_NETIF_HWADDRHINT
   i = find_entry(ipaddr, ETHARP_TRY_HARD, netif);
 #else /* LWIP_NETIF_HWADDRHINT */
+	/* 根据IP地址，在ARP表中查找对应表项或者创建一个新表项
+	 * 参数ETHARP_TRY_HARD表示，如果ARP表中没有empty的表项，
+	 * 则尝试删除最老的表项，创建新表项并返回
+	 */
   i = find_entry(ipaddr, ETHARP_TRY_HARD);
 #endif /* LWIP_NETIF_HWADDRHINT */
 
   /* could not find or create entry? */
+	/* 如果查找或创建表项失败，则返回错误信息
+	 * pbuf不需要释放
+	 */
   if (i < 0) {
     LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_query: could not create ARP entry\n"));
     if (q) {
@@ -1119,6 +1131,10 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
     return (err_t)i;
   }
 
+	/* 
+	 * 如果是新建的表项，状态为empty
+	 * 如果是找到的IP地址匹配的表项，状态为pending或者stable
+	 */
   /* mark a fresh entry as pending (we just sent a request) */
   if (arp_table[i].state == ETHARP_STATE_EMPTY) {
     arp_table[i].state = ETHARP_STATE_PENDING;
