@@ -115,6 +115,10 @@ void Key_KEYALLL_Disposal(void);
   * @retval None
   */
 
+uint32_t adc1[2] = {0x11223344, 0x55667788};
+uint32_t abc2;
+
+uint8_t *pchar;
 
 int main(void)
 {
@@ -127,6 +131,9 @@ int main(void)
 	uint8_t ucKeyCode;		/* 按键代码 */
 	uint32_t ulPktCnt_Last = 0;	/* 上一次数据包个数，用于计数接收包/s */
 	uint32_t ulPktsPerSec = 0;	/* 每秒接收包数 */
+	
+	pchar = ((uint8_t *)adc1) + 1;
+	abc2 = *(uint32_t *)pchar;
 	
 	bsp_Init();
 	

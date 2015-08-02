@@ -605,6 +605,7 @@ etharp_find_addr(struct netif *netif, struct ip_addr *ipaddr,
  *
  * @see pbuf_free()
  */
+/* 使用IP数据包更新ARP表 */
 void
 etharp_ip_input(struct netif *netif, struct pbuf *p)
 {
@@ -650,14 +651,21 @@ etharp_ip_input(struct netif *netif, struct pbuf *p)
  *
  * @see pbuf_free()
  */
+/* 1，响应ARP请求，并更新ARP表
+ * 2，根据ARP回复，更新ARP表
+ */
 void
 etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 {
+	/* ARP数据包头指针 */
   struct etharp_hdr *hdr;
+	/* 以太网帧头指针 */
   struct eth_hdr *ethhdr;
   /* these are aligned properly, whereas the ARP header fields might not be */
+	/* 暂存ARP包的源IP和目的IP */
   struct ip_addr sipaddr, dipaddr;
   u8_t i;
+	/* ARP请求是否发给本机 */
   u8_t for_us;
 #if LWIP_AUTOIP
   const u8_t * ethdst_hwaddr;
@@ -667,17 +675,25 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
   
   /* drop short ARP packets: we have to check for p->len instead of p->tot_len here
      since a struct etharp_hdr is pointed to p->payload, so it musn't be chained! */
+	/* 检查第一个pbuf中的数据长度是否到达ARP包的最小长度
+	 * 因为直接使用etharp_hdr指针操作payload中的数据，如果ARP包分装在两个pbuf中，这种
+	 * 操作方法将造成指针越界
+	 */
   if (p->len < SIZEOF_ETHARP_PACKET) {
     LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_WARNING,
       ("etharp_arp_input: packet dropped, too short (%"S16_F"/%"S16_F")\n", p->tot_len,
       (s16_t)SIZEOF_ETHARP_PACKET));
+		/* 更新统计量 */
     ETHARP_STATS_INC(etharp.lenerr);
     ETHARP_STATS_INC(etharp.drop);
+		/* 直接释放该pbuf，丢弃数据包 */
     pbuf_free(p);
     return;
   }
 
+	/* 以太网帧指针 */
   ethhdr = p->payload;
+	/* ARP数据包指针 */
   hdr = (struct etharp_hdr *)((u8_t*)ethhdr + SIZEOF_ETH_HDR);
 #if ETHARP_SUPPORT_VLAN
   if (ethhdr->type == ETHTYPE_VLAN) {
@@ -686,6 +702,7 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 #endif /* ETHARP_SUPPORT_VLAN */
 
   /* RFC 826 "Packet Reception": */
+	/* 检查ARP数据包和以太网帧各字段有效性 */
   if ((hdr->hwtype != htons(HWTYPE_ETHERNET)) ||
       (hdr->_hwlen_protolen != htons((ETHARP_HWADDR_LEN << 8) | sizeof(struct ip_addr))) ||
       (hdr->proto != htons(ETHTYPE_IP)) ||
@@ -709,31 +726,44 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 
   /* Copy struct ip_addr2 to aligned ip_addr, to support compilers without
    * structure packing (not using structure copy which breaks strict-aliasing rules). */
+	/* 把ARP数据包中的源IP地址和目的IP地址复制到局部变量sipaddr和dipaddr中
+	 * sipaddr和dipaddr是字对齐的
+	 * ARP数据包中的ip地址不是字对齐的，不能直接使用
+	 */
   SMEMCPY(&sipaddr, &hdr->sipaddr, sizeof(sipaddr));
   SMEMCPY(&dipaddr, &hdr->dipaddr, sizeof(dipaddr));
 
   /* this interface is not configured? */
+	/* 如果本网络接口的ip地址未配置，则认为ARP包不是给本机的 */
   if (netif->ip_addr.addr == 0) {
     for_us = 0;
   } else {
+		/* 判断ARP数据包的目的IP是不是本机，直接比较两个字(32bit) */
     /* ARP packet directed to us? */
     for_us = ip_addr_cmp(&dipaddr, &(netif->ip_addr));
   }
 
+	/* ARP包的目的IP地址是本机，则更新ARP表，并允许插入一条新条目 */
   /* ARP message directed to us? */
   if (for_us) {
     /* add IP address in ARP cache; assume requester wants to talk to us.
      * can result in directly sending the queued packets for this host. */
     update_arp_entry(netif, &sipaddr, &(hdr->shwaddr), ETHARP_TRY_HARD);
   /* ARP message not directed to us? */
-  } else {
+  }
+	/* 如果ARP包的目的IP地址不是本机，则只更新ARP表中存在的条目，如果源IP地址
+	 * 在ARP表中不存在，则不更新
+	 */
+	else {
     /* update the source IP address in the cache, if present */
     update_arp_entry(netif, &sipaddr, &(hdr->shwaddr), 0);
   }
 
+	/* 判断是ARP请求还是ARP回复 */
   /* now act on the message itself */
   switch (htons(hdr->opcode)) {
   /* ARP request? */
+	/* 是ARP请求 */
   case ARP_REQUEST:
     /* ARP request. If it asked for our address, we send out a
      * reply. In any case, we time-stamp any existing ARP entry,
@@ -741,15 +771,29 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 
     LWIP_DEBUGF (ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: incoming ARP request\n"));
     /* ARP request for our address? */
+		/* ARP请求的目的IP地址是本机 */
+		/* !!!!!!!!!!!!!!!!!!修改这里可以进行ARP攻击：!!!!!!!!!!!!!!!!!! 
+		 * 1，不论ARP请求的目的IP地址是否是本机，都进行回复
+		 * 2，ARP回复的源IP是ARP请求的目的IP，目的IP是ARP请求的源IP
+		 * ARP回复的源MAC是本机MAC，目的MAC是ARP请求的源MAC
+		 * 这样，发送ARP请求的主机会认为：它请求的IP的MAC地址是本机的MAC地址，所有发给
+		 * 它请求的IP的数据包的目的MAC地址都会填写为本机MAC，进而把所有发向它请求的IP的数据包
+		 * 都发给本机
+		 * 3，另一种方法：直接构造ARP请求，ARP请求的目的IP主机会把ARP请求中的源IP-源MAC地址对应关系
+		 * 更新到其ARP缓存。
+		 */
     if (for_us) {
 
       LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: replying to ARP request for our IP address\n"));
       /* Re-use pbuf to send ARP reply.
          Since we are re-using an existing pbuf, we can't call etharp_raw since
          that would allocate a new pbuf. */
+			/* 在ARP请求包的pbuf上做修改，构造ARP回复 */
       hdr->opcode = htons(ARP_REPLY);
 
+			/* ARP包的目的IP */
       hdr->dipaddr = hdr->sipaddr;
+			/* ARP包的源IP */
       SMEMCPY(&hdr->sipaddr, &netif->ip_addr, sizeof(hdr->sipaddr));
 
       LWIP_ASSERT("netif->hwaddr_len must be the same as ETHARP_HWADDR_LEN for etharp!",
@@ -763,31 +807,42 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 
       while(i > 0) {
         i--;
+				/* ARP包的目的MAC */
         hdr->dhwaddr.addr[i] = hdr->shwaddr.addr[i];
 #if LWIP_AUTOIP
         ethhdr->dest.addr[i] = ethdst_hwaddr[i];
 #else  /* LWIP_AUTOIP */
+				/* 以太网帧的目的MAC */
         ethhdr->dest.addr[i] = hdr->shwaddr.addr[i];
 #endif /* LWIP_AUTOIP */
+				/* ARP包的源MAC，是传入函数的参数 */
         hdr->shwaddr.addr[i] = ethaddr->addr[i];
+				/* 以太网帧的源MAC */
         ethhdr->src.addr[i] = ethaddr->addr[i];
       }
 
       /* hwtype, hwaddr_len, proto, protolen and the type in the ethernet header
          are already correct, we tested that before */
-
+			/* 以太网帧中的其他值保持不变 */
+			
+			/* 把修改后的ARP数据包和携带它的以太网帧发送出去 */
       /* return ARP reply */
       netif->linkoutput(netif, p);
     /* we are not configured? */
-    } else if (netif->ip_addr.addr == 0) {
+    }
+		/* ARP请求不是给本机的，且本机的IP还没有配置 */
+		else if (netif->ip_addr.addr == 0) {
       /* { for_us == 0 and netif->ip_addr.addr == 0 } */
       LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: we are unconfigured, ARP request ignored.\n"));
     /* request was not directed to us */
-    } else {
+    }
+		/* ARP请求不是给本机的，且本机的IP已经配置 */
+		else {
       /* { for_us == 0 and netif->ip_addr.addr != 0 } */
       LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: ARP request was not for us.\n"));
     }
     break;
+	/* 是ARP回复，前面已经更新了ARP表，这里什么都不做 */
   case ARP_REPLY:
     /* ARP reply. We already updated the ARP cache earlier. */
     LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: incoming ARP reply\n"));
@@ -800,10 +855,12 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 #endif
     break;
   default:
+	/* ARP数据包操作码错误 */
     LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: ARP unknown opcode type %"S16_F"\n", htons(hdr->opcode)));
     ETHARP_STATS_INC(etharp.err);
     break;
   }
+	/* 释放底层向本函数提交的pbuf */
   /* free ARP packet */
   pbuf_free(p);
 }
@@ -1205,6 +1262,7 @@ etharp_request(struct netif *netif, struct ip_addr *ipaddr)
  * @param p the recevied packet, p->payload pointing to the ethernet header
  * @param netif the network interface on which the packet was received
  */
+/* ethernetif_input在接收到一帧数据时，调用该函数 */
 err_t
 ethernet_input(struct pbuf *p, struct netif *netif)
 {
@@ -1212,6 +1270,7 @@ ethernet_input(struct pbuf *p, struct netif *netif)
   u16_t type;
 
   /* points to packet payload, which starts with an Ethernet header */
+	/* 获取以太网帧头指针 */
   ethhdr = p->payload;
   LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE,
     ("ethernet_input: dest:%02x:%02x:%02x:%02x:%02x:%02x, src:%02x:%02x:%02x:%02x:%02x:%02x, type:%2hx\n",
@@ -1221,6 +1280,7 @@ ethernet_input(struct pbuf *p, struct netif *netif)
      (unsigned)ethhdr->src.addr[3], (unsigned)ethhdr->src.addr[4], (unsigned)ethhdr->src.addr[5],
      (unsigned)htons(ethhdr->type)));
 
+	/* 获取以太网帧类型 */
   type = htons(ethhdr->type);
 #if ETHARP_SUPPORT_VLAN
   if (type == ETHTYPE_VLAN) {
@@ -1236,26 +1296,36 @@ ethernet_input(struct pbuf *p, struct netif *netif)
   }
 #endif /* ETHARP_SUPPORT_VLAN */
 
+	/* 判断以太网帧类型 */
   switch (type) {
     /* IP packet? */
+		/* 以太网帧中是IP数据包 */
     case ETHTYPE_IP:
+		/* 如果允许使用IP数据包的以太网帧头和IP帧头更新ARP表
+		 * 则更新ARP表
+		 */
 #if ETHARP_TRUST_IP_MAC
       /* update ARP table */
       etharp_ip_input(netif, p);
 #endif /* ETHARP_TRUST_IP_MAC */
       /* skip Ethernet header */
+			/* pbuf的payload指针向后移动，跳过以太网帧头 */
       if(pbuf_header(p, -(s16_t)SIZEOF_ETH_HDR)) {
         LWIP_ASSERT("Can't move over header in packet", 0);
+				/* 若移动失败，则释放pbuf，丢弃数据包 */
         pbuf_free(p);
         p = NULL;
       } else {
+				/* 去掉以太网帧头后，把剩下的IP数据包提交给IP层 */
         /* pass to IP layer */
         ip_input(p, netif);
       }
       break;
       
+		/* 以太网帧中是ARP数据包 */
     case ETHTYPE_ARP:
       /* pass p to ARP module */
+			/* 把以太网帧提交给ARP模块处理 */
       etharp_arp_input(netif, (struct eth_addr*)(netif->hwaddr), p);
       break;
 
@@ -1269,9 +1339,13 @@ ethernet_input(struct pbuf *p, struct netif *netif)
       break;
 #endif /* PPPOE_SUPPORT */
 
+		/* 帧类型错误 */
     default:
+			/* 协议类型错误统计+1 */
       ETHARP_STATS_INC(etharp.proterr);
+			/* 丢弃数据包数量+1 */
       ETHARP_STATS_INC(etharp.drop);
+			/* 释放该pbuf */
       pbuf_free(p);
       p = NULL;
       break;

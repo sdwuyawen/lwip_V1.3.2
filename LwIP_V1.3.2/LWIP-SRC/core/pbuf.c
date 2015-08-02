@@ -488,6 +488,8 @@ pbuf_realloc(struct pbuf *p, u16_t new_len)
  *
  */
 /* 调整pbuf的payload指针，向前或者向后移动一定字节
+ * header_size_increment > 0，向前移动
+ * header_size_increment < 0，向后移动
  * totlen和len也会被更新
  */
 u8_t
