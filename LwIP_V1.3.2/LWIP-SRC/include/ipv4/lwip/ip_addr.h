@@ -139,6 +139,7 @@ extern const struct ip_addr ip_addr_broadcast;
 
 u8_t ip_addr_isbroadcast(struct ip_addr *, struct netif *);
 
+/* 多播IP地址的第一个字节是0b1110xxxx */
 #define ip_addr_ismulticast(addr1) (((addr1)->addr & ntohl(0xf0000000UL)) == ntohl(0xe0000000UL))
 
 #define ip_addr_islinklocal(addr1) (((addr1)->addr & ntohl(0xffff0000UL)) == ntohl(0xa9fe0000UL))

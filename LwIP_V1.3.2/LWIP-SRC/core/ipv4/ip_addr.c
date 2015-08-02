@@ -55,24 +55,32 @@ const struct ip_addr ip_addr_broadcast = { IP_ADDR_BROADCAST_VALUE };
  * @param netif the network interface against which the address is checked
  * @return returns non-zero if the address is a broadcast address
  */
+/* 判断addr是不是网络接口对应的广播IP地址 */
 u8_t ip_addr_isbroadcast(struct ip_addr *addr, struct netif *netif)
 {
   u32_t addr2test;
 
+	/* 获取要判断的IP地址，网络字节序 */
   addr2test = addr->addr;
   /* all ones (broadcast) or all zeroes (old skool broadcast) */
+	/* 全1或全0的IP地址(全0也认为是广播IP) */
   if ((~addr2test == IP_ADDR_ANY_VALUE) ||
       (addr2test == IP_ADDR_ANY_VALUE))
     return 1;
   /* no broadcast support on this network interface? */
+	/* 该接口不支持广播，则任务该IP不是广播地址 */
   else if ((netif->flags & NETIF_FLAG_BROADCAST) == 0)
     /* the given address cannot be a broadcast address
      * nor can we check against any broadcast addresses */
     return 0;
   /* address matches network interface address exactly? => no broadcast */
+	/* 如果该IP地址是网络接口的IP地址，则是单播地址 */
   else if (addr2test == netif->ip_addr.addr)
     return 0;
   /*  on the same (sub) network... */
+	/* 该IP和网络接口IP所在的子网号相同，且
+	 * 该IP对应网络接口子网掩码的主机号全为1，则是广播地址
+	 */
   else if (ip_addr_netcmp(addr, &(netif->ip_addr), &(netif->netmask))
          /* ...and host identifier bits are all ones? =>... */
           && ((addr2test & ~netif->netmask.addr) ==
