@@ -492,6 +492,9 @@ ip_input(struct pbuf *p, struct netif *inp)
  * @note ip_id: RFC791 "some host may be able to simply use
  *  unique identifiers independent of destination"
  */
+/* 填写IP首部中各个字段的值(不包括选项字段)
+ * 并通过netif发送数据报
+ */
 err_t
 ip_output_if(struct pbuf *p, struct ip_addr *src, struct ip_addr *dest,
              u8_t ttl, u8_t tos,
@@ -513,12 +516,18 @@ err_t ip_output_if_opt(struct pbuf *p, struct ip_addr *src, struct ip_addr *dest
 {
 #endif /* IP_OPTIONS_SEND */
   struct ip_hdr *iphdr;
+	/* 记录IP数据报编号，即标识字段 */
   static u16_t ip_id = 0;
 
   snmp_inc_ipoutrequests();
 
+	/* dest为IP_HDRINCL时，表示pbuf中已经填写好了IP首部，且payload已经指向了IP首部
+	 * dest不为IP_HDRINCL时，dest是目的IP地址，payload指向IP数据报包裹的上一层协议的首部，
+	 * IP首部还未填写
+	 */
   /* Should the IP header be generated or is it already included in p? */
   if (dest != IP_HDRINCL) {
+		/* IP首部长度20字节 */
     u16_t ip_hlen = IP_HLEN;
 #if IP_OPTIONS_SEND
     u16_t optlen_aligned = 0;
@@ -541,65 +550,90 @@ err_t ip_output_if_opt(struct pbuf *p, struct ip_addr *src, struct ip_addr *dest
     }
 #endif /* IP_OPTIONS_SEND */
     /* generate IP header */
+		/* 移动pbuf的payload指针，向前移动20字节到IP首部 */
     if (pbuf_header(p, IP_HLEN)) {
+			/* 移动失败，则返回错误信息 */
       LWIP_DEBUGF(IP_DEBUG | LWIP_DBG_LEVEL_SERIOUS, ("ip_output: not enough room for IP header in pbuf\n"));
 
       IP_STATS_INC(ip.err);
       snmp_inc_ipoutdiscards();
       return ERR_BUF;
     }
-
+		/* iphdr指向IP首部 */
     iphdr = p->payload;
     LWIP_ASSERT("check that first pbuf can hold struct ip_hdr",
                (p->len >= sizeof(struct ip_hdr)));
 
+		/* 填写TTL */
     IPH_TTL_SET(iphdr, ttl);
+		/* 填写协议 */
     IPH_PROTO_SET(iphdr, proto);
 
+		/* 填写目的IP地址 */
     ip_addr_set(&(iphdr->dest), dest);
 
+		/* 填写版本号、首部长度、服务类型 */
     IPH_VHLTOS_SET(iphdr, 4, ip_hlen / 4, tos);
+		/* 填写IP报文总长度 */
     IPH_LEN_SET(iphdr, htons(p->tot_len));
+		/* 填写分片偏移量 */
     IPH_OFFSET_SET(iphdr, 0);
+		/* 填写报文标识 */
     IPH_ID_SET(iphdr, htons(ip_id));
+		/* 数据报编号+1 */
     ++ip_id;
 
+		/* 传入的源IP地址为空，则把源IP地址填写为网络接口的IP地址 */
     if (ip_addr_isany(src)) {
       ip_addr_set(&(iphdr->src), &(netif->ip_addr));
-    } else {
+    }
+		/* 传入的源IP地址不为空，则把源IP地址填写到IP报头 */
+		else {
       ip_addr_set(&(iphdr->src), src);
     }
 
+		/* 清0IP报头中的首部校验和 */
     IPH_CHKSUM_SET(iphdr, 0);
 #if CHECKSUM_GEN_IP
+		/* 计算并填写首部校验和 */
     IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, ip_hlen));
 #endif
-  } else {
+  }
+	/* dest为IP_HDRINCL时，表示pbuf中已经填写好了IP首部，且payload已经指向了IP首部 */
+	else {
     /* IP header already included in p */
+		/* 设置iphdr指针 */
     iphdr = p->payload;
+		/* 获取上层填写好的IP报头中的目的IP地址 */
     dest = &(iphdr->dest);
   }
 
+	/* 更新发送统计量 */
   IP_STATS_INC(ip.xmit);
 
   LWIP_DEBUGF(IP_DEBUG, ("ip_output_if: %c%c%"U16_F"\n", netif->name[0], netif->name[1], netif->num));
   ip_debug_print(p);
 
 #if ENABLE_LOOPBACK
+	/* 如果目的IP地址和网络接口IP地址相同，则调用环回输出
+	 */
   if (ip_addr_cmp(dest, &netif->ip_addr)) {
     /* Packet to self, enqueue it for loopback */
     LWIP_DEBUGF(IP_DEBUG, ("netif_loop_output()"));
+		/* 把pbuf挂到netif的loop_first链表上 */
     return netif_loop_output(netif, p, dest);
   }
 #endif /* ENABLE_LOOPBACK */
 #if IP_FRAG
   /* don't fragment if interface has mtu set to 0 [loopif] */
+	/* 如果网络接口的MTU已经设置，且数据包长度大于MTU，则进行分片 */
   if (netif->mtu && (p->tot_len > netif->mtu)) {
     return ip_frag(p,netif,dest);
   }
 #endif
 
   LWIP_DEBUGF(IP_DEBUG, ("netif->output()"));
+	/* 不是环回IP地址，且不用分片，则调用etharp_output()发送pbuf */
   return netif->output(netif, p, dest);
 }
 
@@ -620,18 +654,24 @@ err_t ip_output_if_opt(struct pbuf *p, struct ip_addr *src, struct ip_addr *dest
  * @return ERR_RTE if no route is found
  *         see ip_output_if() for more return values
  */
+/* 被传输层函数调用完成数据报的发送
+ * 查找网络接口并调用ip_output_if()完成最终的发送工作
+ */
 err_t
 ip_output(struct pbuf *p, struct ip_addr *src, struct ip_addr *dest,
           u8_t ttl, u8_t tos, u8_t proto)
 {
   struct netif *netif;
 
+	/* 根据目的IP地址为数据报寻找一个合适的网络接口 */
   if ((netif = ip_route(dest)) == NULL) {
+		/* 若找不到，则返回错误信息 */
     LWIP_DEBUGF(IP_DEBUG, ("ip_output: No route to 0x%"X32_F"\n", dest->addr));
     IP_STATS_INC(ip.rterr);
     return ERR_RTE;
   }
 
+	/* 找到合适的网络接口，则调用ip_output_if()，并传递netif参数 */
   return ip_output_if(p, src, dest, ttl, tos, proto, netif);
 }
 
