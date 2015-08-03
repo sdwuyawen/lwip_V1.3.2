@@ -1087,7 +1087,9 @@ etharp_output(struct netif *netif, struct pbuf *q, struct ip_addr *ipaddr)
  * - ERR_ARG Non-unicast address given, those will not appear in ARP cache.
  *
  */
-/* 查找单播地址ipaddr对应的MAC地址，并向该MAC地址发送数据包 */
+/* 查找单播地址ipaddr对应的MAC地址，并向该MAC地址发送数据包
+ * 注意：不论发送/挂接是否成功，都不需要释放原pbuf
+ */
 err_t
 etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
 {
@@ -1135,6 +1137,7 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
 	 * 如果是新建的表项，状态为empty
 	 * 如果是找到的IP地址匹配的表项，状态为pending或者stable
 	 */
+	/* 把empty状态的ARP表项改为pending状态 */
   /* mark a fresh entry as pending (we just sent a request) */
   if (arp_table[i].state == ETHARP_STATE_EMPTY) {
     arp_table[i].state = ETHARP_STATE_PENDING;
@@ -1145,9 +1148,14 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
   ((arp_table[i].state == ETHARP_STATE_PENDING) ||
    (arp_table[i].state == ETHARP_STATE_STABLE)));
 
+	/* 如果ARP表项是pending状态，则发送一个ARP请求
+	 * 如果pbuf为空指针，则表示没有数据包要发送，只强制发送一个ARP请求
+	 * 利用ARP回复来更新ARP表项
+	 */
   /* do we have a pending entry? or an implicit query request? */
   if ((arp_table[i].state == ETHARP_STATE_PENDING) || (q == NULL)) {
     /* try to resolve it; send out ARP request */
+		/* 向IP地址为ipaddr的主机发送一个ARP请求 */
     result = etharp_request(netif, ipaddr);
     if (result != ERR_OK) {
       /* ARP request couldn't be sent */
@@ -1158,20 +1166,28 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
   }
   
   /* packet given? */
+	/* 如果有数据包要发送，则根据对应ARP表项的状态做不同处理 */
   if (q != NULL) {
     /* stable entry? */
+		/* ARP表项是stable状态，则使用etharp_send_ip把IP包包裹上MAC头并发送 */
     if (arp_table[i].state == ETHARP_STATE_STABLE) {
       /* we have a valid IP->Ethernet address mapping */
       /* send the packet */
       result = etharp_send_ip(netif, q, srcaddr, &(arp_table[i].ethaddr));
     /* pending entry? (either just created or already pending */
+		/* ARP表项是pending状态，则把数据包挂接到ARP表项的发送链表上 */
     } else if (arp_table[i].state == ETHARP_STATE_PENDING) {
 #if ARP_QUEUEING /* queue the given q packet */
       struct pbuf *p;
+			/* 如果pbuf链表全是PBUF_ROM类型，则不需要拷贝
+			 * 其他情况下需要拷贝。因为挂接到ARP表项的发送链表后，这些pbuf不会立刻被发送出去
+			 * 在等待发送的过程中数据包的内部数据可能被上层修改
+			 */
       int copy_needed = 0;
       /* IF q includes a PBUF_REF, PBUF_POOL or PBUF_RAM, we have no choice but
        * to copy the whole queue into a new PBUF_RAM (see bug #11400) 
        * PBUF_ROMs can be left as they are, since ROM must not get changed. */
+			/* 遍历pbuf链表，判断pbuf是否都是PBUF_ROM类型 */
       p = q;
       while (p) {
         LWIP_ASSERT("no packet queues allowed!", (p->len != p->tot_len) || (p->next == 0));
@@ -1181,50 +1197,77 @@ etharp_query(struct netif *netif, struct ip_addr *ipaddr, struct pbuf *q)
         }
         p = p->next;
       }
+			/* 如果需要拷贝，则申请一个pbuf空间 */
       if(copy_needed) {
         /* copy the whole packet into new pbufs */
         p = pbuf_alloc(PBUF_RAW, p->tot_len, PBUF_RAM);
+				/* 申请成功 */
         if(p != NULL) {
           if (pbuf_copy(p, q) != ERR_OK) {
+						/* 拷贝失败，则释放申请的pbuf空间 */
             pbuf_free(p);
             p = NULL;
           }
         }
-      } else {
+      }
+			/* 不需要拷贝，则增加pbuf的引用数 */
+			else {
         /* referencing the old pbuf is enough */
         p = q;
+				/* 增加pbuf的引用次数后，一次pbuf_free()操作只会减少引用次数
+				 * 并不会真正释放该pbuf
+				 */
         pbuf_ref(p);
       }
+			/* 在这里，p指向需要挂接的数据包，下面进行挂接 */
       /* packet could be taken over? */
       if (p != NULL) {
         /* queue packet ... */
         struct etharp_q_entry *new_entry;
         /* allocate a new arp queue entry */
+				/* 申请一个struct etharp_q_entry结构 */
         new_entry = memp_malloc(MEMP_ARP_QUEUE);
+				/* 申请成功，进行挂接操作 */
         if (new_entry != NULL) {
           new_entry->next = 0;
           new_entry->p = p;
+					/* 若对应ARP表项的struct etharp_q_entry链表不为空，则把新申请的struct etharp_q_entry节点
+					 * 挂接到该链表尾部
+					 */
           if(arp_table[i].q != NULL) {
             /* queue was already existent, append the new entry to the end */
             struct etharp_q_entry *r;
             r = arp_table[i].q;
+						/* 遍历struct etharp_q_entry链表，找到链表尾 */
             while (r->next != NULL) {
               r = r->next;
             }
+						/* 把新申请的struct etharp_q_entry节点挂到链表尾 */
             r->next = new_entry;
-          } else {
+          }
+					/* ARP表项对应的struct etharp_q_entry链表为空，则直接调整该链表头指针 */
+					else {
             /* queue did not exist, first item in queue */
             arp_table[i].q = new_entry;
           }
           LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_query: queued packet %p on ARP entry %"S16_F"\n", (void *)q, (s16_t)i));
-          result = ERR_OK;
-        } else {
+          /* 操作成功 */
+					result = ERR_OK;
+        }
+				/* 申请struct etharp_q_entry失败，释放pbuf */
+				else {
           /* the pool MEMP_ARP_QUEUE is empty */
+					/* 对于不全是PBUF_ROM类型的pbuf，已经复制到一个新申请的pbuf中，下面的操作是释放新申请的pbuf空间
+					 * 对于全是PBUF_ROM类型的pbuf，pbuf_ref(p)增加了它的引用次数，pbuf_free(p)会减少pbuf的引用次数，在引用
+					 * 次数到0时才会真正释放pbuf空间
+					 */
           pbuf_free(p);
           LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_query: could not queue a copy of PBUF_REF packet %p (out of memory)\n", (void *)q));
           /* { result == ERR_MEM } through initialization */
         }
-      } else {
+      }
+			/* 需要挂接的数据包为空，说明申请pbuf失败，但并需要释放原来的pbuf */
+			else {
         ETHARP_STATS_INC(etharp.memerr);
         LWIP_DEBUGF(ETHARP_DEBUG | LWIP_DBG_TRACE, ("etharp_query: could not queue a copy of PBUF_REF packet %p (out of memory)\n", (void *)q));
         /* { result == ERR_MEM } through initialization */
