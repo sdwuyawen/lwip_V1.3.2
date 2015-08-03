@@ -374,7 +374,7 @@ void LwIP_APP_Init(void)
 	  netmask.addr = 0;
 	  gw.addr = 0; 
 	#else										//
-	  IP4_ADDR(&ipaddr, 202, 194, 201, 232);  		//设置本地ip地址
+	  IP4_ADDR(&ipaddr, 202, 194, 201, 233);  		//设置本地ip地址
 	  IP4_ADDR(&gw, 202, 194, 201, 254);			//网关
 	  IP4_ADDR(&netmask, 255, 255, 255, 0);		//子网掩码	 
 	#endif

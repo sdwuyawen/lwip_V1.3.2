@@ -111,23 +111,34 @@ struct ip_pcb {
 PACK_STRUCT_BEGIN
 struct ip_hdr {
   /* version / header length / type of service */
+	/* 版本号、首部长度、服务类型 */
   PACK_STRUCT_FIELD(u16_t _v_hl_tos);
   /* total length */
+	/* 总长度 */
   PACK_STRUCT_FIELD(u16_t _len);
   /* identification */
+	/* 标识 */
   PACK_STRUCT_FIELD(u16_t _id);
   /* fragment offset field */
+	/* 3位标志和13位片偏移 */
   PACK_STRUCT_FIELD(u16_t _offset);
 #define IP_RF 0x8000        /* reserved fragment flag */
+	/* 标志掩码：不分片 */
 #define IP_DF 0x4000        /* dont fragment flag */
+	/* 标志掩码：更多分片 */
 #define IP_MF 0x2000        /* more fragments flag */
+	/* 13位片偏移掩码 */
 #define IP_OFFMASK 0x1fff   /* mask for fragmenting bits */
   /* time to live / protocol*/
+	/* 8位TTL，8位协议 */
   PACK_STRUCT_FIELD(u16_t _ttl_proto);
   /* checksum */
+	/* 16位首部校验和 */
   PACK_STRUCT_FIELD(u16_t _chksum);
   /* source and destination IP addresses */
+	/* 源IP地址 */
   PACK_STRUCT_FIELD(struct ip_addr src);
+	/* 目的IP地址 */
   PACK_STRUCT_FIELD(struct ip_addr dest); 
 } PACK_STRUCT_STRUCT;
 PACK_STRUCT_END
@@ -135,22 +146,39 @@ PACK_STRUCT_END
 #  include "arch/epstruct.h"
 #endif
 
+/* 获取版本号 */
 #define IPH_V(hdr)  (ntohs((hdr)->_v_hl_tos) >> 12)
+/* 获取首部长度 */
 #define IPH_HL(hdr) ((ntohs((hdr)->_v_hl_tos) >> 8) & 0x0f)
+/* 获取服务类型 */
 #define IPH_TOS(hdr) (ntohs((hdr)->_v_hl_tos) & 0xff)
+/* 获取总长度(网络字节序) */
 #define IPH_LEN(hdr) ((hdr)->_len)
+/* 获取标识(网络字节序) */
 #define IPH_ID(hdr) ((hdr)->_id)
+/* 获取3位标志+片偏移(网络字节序) */
 #define IPH_OFFSET(hdr) ((hdr)->_offset)
+/* 获取TTL */
 #define IPH_TTL(hdr) (ntohs((hdr)->_ttl_proto) >> 8)
+/* 获取协议 */
 #define IPH_PROTO(hdr) (ntohs((hdr)->_ttl_proto) & 0xff)
+/* 获取首部校验和(网络字节序) */
 #define IPH_CHKSUM(hdr) ((hdr)->_chksum)
 
+/* 填写IP首部各个字段的值 */
+/* 填写版本号、首部长度、服务类型 */
 #define IPH_VHLTOS_SET(hdr, v, hl, tos) (hdr)->_v_hl_tos = (htons(((v) << 12) | ((hl) << 8) | (tos)))
+/* 填写总长度(网络字节序) */
 #define IPH_LEN_SET(hdr, len) (hdr)->_len = (len)
+/* 填写标识(网络字节序) */
 #define IPH_ID_SET(hdr, id) (hdr)->_id = (id)
+/* 填写3位标志+13位片偏移(网络字节序) */
 #define IPH_OFFSET_SET(hdr, off) (hdr)->_offset = (off)
+/* 设置TTL */
 #define IPH_TTL_SET(hdr, ttl) (hdr)->_ttl_proto = (htons(IPH_PROTO(hdr) | ((u16_t)(ttl) << 8)))
+/* 设置协议 */
 #define IPH_PROTO_SET(hdr, proto) (hdr)->_ttl_proto = (htons((proto) | (IPH_TTL(hdr) << 8)))
+/* 设置首部校验和(网络字节序) */
 #define IPH_CHKSUM_SET(hdr, chksum) (hdr)->_chksum = (chksum)
 
 /** The interface that provided the packet for the current callback invocation. */
