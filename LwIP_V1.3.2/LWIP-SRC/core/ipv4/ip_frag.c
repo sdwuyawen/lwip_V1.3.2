@@ -606,6 +606,11 @@ nullreturn:
 }
 #endif /* IP_REASSEMBLY */
 
+/* IP分片使用，该数组大小是IP层允许的最大分片大小，每个分片会被先后拷贝到
+ * 该数组中，然后发送
+ * 多申请MEM_ALIGNMENT - 1是为了使用buf时，可以不从buf的起始地址开始用，
+ * 而是从pbuf的4字节对齐地址作为起始地址
+ */
 #if IP_FRAG
 #if IP_FRAG_USES_STATIC_BUF
 static u8_t buf[LWIP_MEM_ALIGN_SIZE(IP_FRAG_MAX_MTU + MEM_ALIGNMENT - 1)];
@@ -624,22 +629,32 @@ static u8_t buf[LWIP_MEM_ALIGN_SIZE(IP_FRAG_MAX_MTU + MEM_ALIGNMENT - 1)];
  *
  * @return ERR_OK if sent successfully, err_t otherwise
  */
+/* 把数据报p进行分片发送，在ip_output_if()中被调用 */
 err_t 
 ip_frag(struct pbuf *p, struct netif *netif, struct ip_addr *dest)
 {
+	/* 分片使用的pbuf结构 */
   struct pbuf *rambuf;
 #if IP_FRAG_USES_STATIC_BUF
+	/* 以太网帧pbuf */
   struct pbuf *header;
 #else
   struct pbuf *newpbuf;
   struct ip_hdr *original_iphdr;
 #endif
+	/* IP首部指针 */
   struct ip_hdr *iphdr;
+	/* 一个分片中允许的IP有效载荷字节数 */
   u16_t nfb;
+	/* 待发送的数据长度和本次发送的数据长度 */
   u16_t left, cop;
+	/* 网络接口MTU */
   u16_t mtu = netif->mtu;
+	/* 分片偏移量和更多分片位 */
   u16_t ofo, omf;
+	/* 是否是最后一个分片 */
   u16_t last;
+	/* 发送的数据在原始pbuf中的偏移量 */
   u16_t poff = IP_HLEN;
   u16_t tmp;
 #if !IP_FRAG_USES_STATIC_BUF
@@ -653,16 +668,22 @@ ip_frag(struct pbuf *p, struct netif *netif, struct ip_addr *dest)
    * use to reference the packet (without link header).
    * Layer and length is irrelevant.
    */
+	/* 申请一个PBUF_REF类型的pbuf */
   rambuf = pbuf_alloc(PBUF_LINK, 0, PBUF_REF);
   if (rambuf == NULL) {
+		/* 申请失败，返回错误 */
     LWIP_DEBUGF(IP_REASS_DEBUG, ("ip_frag: pbuf_alloc(PBUF_LINK, 0, PBUF_REF) failed\n"));
     return ERR_MEM;
   }
+	/* 设置pbuf的tot_len和len为接口的MTU */
   rambuf->tot_len = rambuf->len = mtu;
+	/* payload指向buf，首地址4字节对齐 */
   rambuf->payload = LWIP_MEM_ALIGN((void *)buf);
 
   /* Copy the IP header in it */
+	/* 得到分片包的存储区域，起始是IP报头 */
   iphdr = rambuf->payload;
+	/* 把原始IP数据包的首部拷贝到分片的首部 */
   SMEMCPY(iphdr, p->payload, IP_HLEN);
 #else /* IP_FRAG_USES_STATIC_BUF */
   original_iphdr = p->payload;
@@ -671,25 +692,37 @@ ip_frag(struct pbuf *p, struct netif *netif, struct ip_addr *dest)
 
   /* Save original offset */
   tmp = ntohs(IPH_OFFSET(iphdr));
+	/* 获得偏移量，对原始数据报应该是0 */
   ofo = tmp & IP_OFFMASK;
+	/* 获得更多分片标志 */
   omf = tmp & IP_MF;
-
+	/* 待发送的IP数据报有效载荷总长度 */
   left = p->tot_len - IP_HLEN;
-
+	/* 一个分片中可以保存的最大有效载荷长度 */
   nfb = (mtu - IP_HLEN) / 8;
 
+	/* 待发送数据长度>0 */
   while (left) {
+		/* 待发送数据长度小于MTU - IP报头长度，则是最后一个分片，否则还有更多分片 */
     last = (left <= mtu - IP_HLEN);
 
     /* Set new offset and MF flag */
+		/* 计算偏移量和更多分片标志 */
     tmp = omf | (IP_OFFMASK & (ofo));
     if (!last)
       tmp = tmp | IP_MF;
 
+		/* 当前帧要发送的数据长度
+		 * 如果是最后一个分片，则长度为left
+		 * 如果不是最后一个分片，则长度是IP载荷最大可用长度
+		 */
     /* Fill this fragment */
     cop = last ? left : nfb * 8;
 
 #if IP_FRAG_USES_STATIC_BUF
+		/* poff是拷贝的起始位置
+		 * p是源pbuf，iphdr + IP_HLEN是目的地址，cop是本次要拷贝的长度
+		 */
     poff += pbuf_copy_partial(p, (u8_t*)iphdr + IP_HLEN, cop, poff);
 #else /* IP_FRAG_USES_STATIC_BUF */
     /* When not using a static buffer, create a chain of pbufs.
@@ -737,13 +770,21 @@ ip_frag(struct pbuf *p, struct netif *netif, struct ip_addr *dest)
     poff = newpbuflen;
 #endif /* IP_FRAG_USES_STATIC_BUF */
 
+		/* 填写分片首部中的其他字段
+		 * 对于每个分片来说，要修改的是总长度、分片偏移量+3位标志、首部校验和
+		 */
     /* Correct header */
+		/* 设置偏移量和更多分片标志 */
     IPH_OFFSET_SET(iphdr, htons(tmp));
+		/* 当前分片IP数据报总长度 */
     IPH_LEN_SET(iphdr, htons(cop + IP_HLEN));
+		/* 清0IP首部校验和 */
     IPH_CHKSUM_SET(iphdr, 0);
+		/* 设置IP首部校验和 */
     IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, IP_HLEN));
 
 #if IP_FRAG_USES_STATIC_BUF
+		/* 如果是最后一个分片，则减小rambuf大小，即更改pbuf的len和totlen字段 */
     if (last)
       pbuf_realloc(rambuf, left + IP_HLEN);
 
@@ -752,14 +793,20 @@ ip_frag(struct pbuf *p, struct netif *netif, struct ip_addr *dest)
      * free it.A PBUF_ROM style pbuf for which pbuf_header
      * worked would make things simpler.
      */
+		/* 重新申请一个PBUF_RAM类型的pbuf，只预留链路层首部大小 */
     header = pbuf_alloc(PBUF_LINK, 0, PBUF_RAM);
     if (header != NULL) {
+			/* 申请成功，则把header和IP报文rambuf连接起来，rambuf的ref会+1 */
       pbuf_chain(header, rambuf);
+			/* 调用etharp_output()，进行ARP层的发送 */
       netif->output(netif, header, dest);
       IPFRAG_STATS_INC(ip_frag.xmit);
       snmp_inc_ipfragcreates();
+			/* 发送完成，IP层释放header链表，rambuf的引用次数>1，不会被释放 */
       pbuf_free(header);
-    } else {
+    }
+		/* 申请PBUF_RAM类型pbuf失败，则释放rambuf，并返回错误信息 */
+		else {
       LWIP_DEBUGF(IP_REASS_DEBUG, ("ip_frag: pbuf_alloc() for header failed\n"));
       pbuf_free(rambuf);
       return ERR_MEM;
@@ -780,10 +827,13 @@ ip_frag(struct pbuf *p, struct netif *netif, struct ip_addr *dest)
     
     pbuf_free(rambuf);
 #endif /* IP_FRAG_USES_STATIC_BUF */
+		/* 待发送数据长度减去本次发送的长度 */
     left -= cop;
+		/* 分片偏移量增加 */
     ofo += nfb;
   }
 #if IP_FRAG_USES_STATIC_BUF
+	/* 释放rambuf结构 */
   pbuf_free(rambuf);
 #endif /* IP_FRAG_USES_STATIC_BUF */
   snmp_inc_ipfragoks();
