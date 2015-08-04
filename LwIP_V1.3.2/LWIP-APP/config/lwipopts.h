@@ -85,10 +85,10 @@
 //#define API_LIB_DEBUG                   LWIP_DBG_ON
 //#define API_MSG_DEBUG                   LWIP_DBG_ON
 //#define SOCKETS_DEBUG                   LWIP_DBG_ON
-//#define ICMP_DEBUG                      LWIP_DBG_ON
+#define ICMP_DEBUG                      LWIP_DBG_ON
 //#define IGMP_DEBUG                      LWIP_DBG_ON
 //#define INET_DEBUG                      LWIP_DBG_ON
-//#define IP_DEBUG                        LWIP_DBG_ON     
+#define IP_DEBUG                        LWIP_DBG_ON     
 //#define IP_REASS_DEBUG                  LWIP_DBG_ON
 //#define RAW_DEBUG                       LWIP_DBG_ON
 //#define MEM_DEBUG                       LWIP_DBG_ON

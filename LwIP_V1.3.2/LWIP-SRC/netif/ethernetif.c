@@ -110,7 +110,13 @@ low_level_init(struct netif *netif)
   netif->hwaddr[5] = mymac[5];
 	
   /* maximum transfer unit */
-  netif->mtu = MAX_FRAMELEN; 
+//  netif->mtu = MAX_FRAMELEN;
+	/* Fatal! 接口的MTU是不包括链路层的源MAC和目的MAC以及CRC的长度
+	 * 在ip_frag()中，会根据netif->mtu对IP数据报分片。如果netif->mtu是1518，
+	 * 则IP数据报长度会分片为1518字节，加上14字节的以太网帧头，变成了1532字节，已经超过了
+	 * 链路实际MTU。同时，low_level_output()对长度大于1514字节的以太网帧直接丢弃。
+	 */
+	netif->mtu = 1500; 
   if(ENC28J60_Init((u8*)mymac))	//初始化ENC28J60	
   {
 		return ERR_IF;			//底层网络接口错误
@@ -155,10 +161,13 @@ low_level_output(struct netif *netif, struct pbuf *p)
   pbuf_header(p, -ETH_PAD_SIZE); /* drop the padding word */
 #endif
 
-	/* pbuf中的数据过长，无法复制到发送缓冲区 */
+	/* pbuf中的数据过长，无法复制到发送缓冲区
+	 * 丢弃长度大于1514字节的以太网帧
+	 */
 	if(p->tot_len > sizeof(lwip_buf))
 	{
 		LINK_STATS_INC(link.err);
+		printf("low_level_output() drop %u length packet\n", p->tot_len);
 		return ERR_IF;
 	}
 	
