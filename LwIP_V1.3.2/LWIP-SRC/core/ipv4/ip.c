@@ -533,7 +533,7 @@ ip_input(struct pbuf *p, struct netif *inp)
           !ip_addr_ismulticast(&(iphdr->dest))) {
 				/* pbuf的payload指向IP数据报首部 */
         p->payload = iphdr;
-				/* 发送ICMP目的不可达报文 */
+				/* 发送ICMP目的不可达报文，代码是ICMP_DUR_PROTO协议不可达 */
         icmp_dest_unreach(p, ICMP_DUR_PROTO);
       }
 #endif /* LWIP_ICMP */

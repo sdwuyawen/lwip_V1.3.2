@@ -61,6 +61,10 @@
 #endif /* LWIP_ICMP_ECHO_CHECK_INPUT_PBUF_LEN */
 
 /* The amount of data from the original packet to return in a dest-unreachable */
+/* 在目的不可达报文中，返回的引起差错的IP数据报有效载荷长度
+ * TCP和UDP首部的前8字节都包括端口号，接收目的不可达差错报文的主机的IP层可以根据端口号
+ * 把ICMP报文传递给上层处理
+ */
 #define ICMP_DEST_UNREACH_DATASIZE 8
 
 static void icmp_send_response(struct pbuf *p, u8_t type, u8_t code);
@@ -251,9 +255,14 @@ memerr:
  *          p->payload pointing to the IP header
  * @param t type of the 'unreachable' packet
  */
+/* 发送一个目的地址不可达差错报文
+ * pbuf是引起差错的报文
+ * t是要填写的ICMP报文首部的代码字段
+ */
 void
 icmp_dest_unreach(struct pbuf *p, enum icmp_dur_type t)
 {
+	/* ICMP_DUR是ICMP报文的首部的类型字段 */
   icmp_send_response(p, ICMP_DUR, t);
 }
 
@@ -265,9 +274,11 @@ icmp_dest_unreach(struct pbuf *p, enum icmp_dur_type t)
  *          p->payload pointing to the IP header
  * @param t type of the 'time exceeded' packet
  */
+/* 发送一个数据报超时差错报文 */
 void
 icmp_time_exceeded(struct pbuf *p, enum icmp_te_type t)
 {
+	/* ICMP_TE是ICMP报文的首部的类型字段 */
   icmp_send_response(p, ICMP_TE, t);
 }
 
@@ -281,24 +292,31 @@ icmp_time_exceeded(struct pbuf *p, enum icmp_te_type t)
  * @param type Type of the ICMP header
  * @param code Code of the ICMP header
  */
+/* 发送一个ICMP差错报文 */
 static void
 icmp_send_response(struct pbuf *p, u8_t type, u8_t code)
 {
   struct pbuf *q;
   struct ip_hdr *iphdr;
   /* we can use the echo header here */
+	/* 用回显请求的首部描述差错报文首部 */
   struct icmp_echo_hdr *icmphdr;
 
   /* ICMP header + IP header + 8 bytes of data */
+	/* 在IP层申请一个pbuf，会自动预留IP首部和以太网帧首部，
+	 * 申请的大小是回显请求首部 + 引起差错的IP数据报首部大小 + IP数据报载荷的前8字节
+	 */
   q = pbuf_alloc(PBUF_IP, sizeof(struct icmp_echo_hdr) + IP_HLEN + ICMP_DEST_UNREACH_DATASIZE,
                  PBUF_RAM);
   if (q == NULL) {
+		/* 申请失败，则返回 */
     LWIP_DEBUGF(ICMP_DEBUG, ("icmp_time_exceeded: failed to allocate pbuf for ICMP packet.\n"));
     return;
   }
   LWIP_ASSERT("check that first pbuf can hold icmp message",
              (q->len >= (sizeof(struct icmp_echo_hdr) + IP_HLEN + ICMP_DEST_UNREACH_DATASIZE)));
 
+	/* 指向引起差错的IP数据报 */
   iphdr = p->payload;
   LWIP_DEBUGF(ICMP_DEBUG, ("icmp_time_exceeded from "));
   ip_addr_debug_print(ICMP_DEBUG, &(iphdr->src));
@@ -306,17 +324,23 @@ icmp_send_response(struct pbuf *p, u8_t type, u8_t code)
   ip_addr_debug_print(ICMP_DEBUG, &(iphdr->dest));
   LWIP_DEBUGF(ICMP_DEBUG, ("\n"));
 
+	/* 指向ICMP报文首部 */
   icmphdr = q->payload;
+	/* 填写类型字段 */
   icmphdr->type = type;
+	/* 填写代码字段 */
   icmphdr->code = code;
+	/* ICMP首部第4-7字节填0 */
   icmphdr->id = 0;
   icmphdr->seqno = 0;
 
   /* copy fields from original packet */
+	/* 复制引起差错的IP数据报首部+8字节到ICMP数据字段 */
   SMEMCPY((u8_t *)q->payload + sizeof(struct icmp_echo_hdr), (u8_t *)p->payload,
           IP_HLEN + ICMP_DEST_UNREACH_DATASIZE);
 
   /* calculate checksum */
+	/* 计算并填写校验和 */
   icmphdr->chksum = 0;
   icmphdr->chksum = inet_chksum(icmphdr, q->len);
   ICMP_STATS_INC(icmp.xmit);
@@ -324,7 +348,9 @@ icmp_send_response(struct pbuf *p, u8_t type, u8_t code)
   snmp_inc_icmpoutmsgs();
   /* increase number of destination unreachable messages attempted to send */
   snmp_inc_icmpouttimeexcds();
+	/* 调用IP层函数输出ICMP报文 */
   ip_output(q, NULL, &(iphdr->src), ICMP_TTL, 0, IP_PROTO_ICMP);
+	/* 发送完成，释放申请的ICMP用的pbuf */
   pbuf_free(q);
 }
 

@@ -41,6 +41,7 @@
 extern "C" {
 #endif
 
+/* 定义常见的ICMP报文类型 */
 #define ICMP_ER 0      /* echo reply */
 #define ICMP_DUR 3     /* destination unreachable */
 #define ICMP_SQ 4      /* source quench */
@@ -53,6 +54,7 @@ extern "C" {
 #define ICMP_IRQ 15    /* information request */
 #define ICMP_IR 16     /* information reply */
 
+/* 目的站不可达(3)报文中代码字段常用取值 */
 enum icmp_dur_type {
   ICMP_DUR_NET = 0,    /* net unreachable */
   ICMP_DUR_HOST = 1,   /* host unreachable */
@@ -62,6 +64,7 @@ enum icmp_dur_type {
   ICMP_DUR_SR = 5      /* source route failed */
 };
 
+/* 数据报超时(11)报文中代码字段取值 */
 enum icmp_te_type {
   ICMP_TE_TTL = 0,     /* time to live exceeded in transit */
   ICMP_TE_FRAG = 1     /* fragment reassembly time exceeded */
@@ -75,6 +78,7 @@ enum icmp_te_type {
  *  This header is also used for other ICMP types that do not
  *  use the data part.
  */
+/* 定义ICMP回显请求报文首部 */
 PACK_STRUCT_BEGIN
 struct icmp_echo_hdr {
   PACK_STRUCT_FIELD(u8_t type);
@@ -88,10 +92,12 @@ PACK_STRUCT_END
 #  include "arch/epstruct.h"
 #endif
 
+/* 获取ICMP首部中的字段 */
 #define ICMPH_TYPE(hdr) ((hdr)->type)
 #define ICMPH_CODE(hdr) ((hdr)->code)
 
 /** Combines type and code to an u16_t */
+/* 向ICMP首部写入值 */
 #define ICMPH_TYPE_SET(hdr, t) ((hdr)->type = (t))
 #define ICMPH_CODE_SET(hdr, c) ((hdr)->code = (c))
 
