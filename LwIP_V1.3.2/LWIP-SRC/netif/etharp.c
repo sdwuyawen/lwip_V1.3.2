@@ -1481,14 +1481,14 @@ ethernet_input(struct pbuf *p, struct netif *netif)
       etharp_ip_input(netif, p);
 #endif /* ETHARP_TRUST_IP_MAC */
       /* skip Ethernet header */
-			/* pbuf的payload指针向后移动，跳过以太网帧头 */
+			/* pbuf的payload指针向后移动，跳过以太网帧头，指向IP报头 */
       if(pbuf_header(p, -(s16_t)SIZEOF_ETH_HDR)) {
         LWIP_ASSERT("Can't move over header in packet", 0);
 				/* 若移动失败，则释放pbuf，丢弃数据包 */
         pbuf_free(p);
         p = NULL;
       } else {
-				/* 去掉以太网帧头后，把剩下的IP数据包提交给IP层 */
+				/* 去掉以太网帧头后，把剩下的IP数据报提交给IP层 */
         /* pass to IP layer */
         ip_input(p, netif);
       }
