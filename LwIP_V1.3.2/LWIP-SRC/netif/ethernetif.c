@@ -170,6 +170,10 @@ low_level_output(struct netif *netif, struct pbuf *p)
 		printf("low_level_output() drop %u length packet\n", p->tot_len);
 		return ERR_IF;
 	}
+	else
+	{
+		printf("low_level_output() send %u length packet\n", p->tot_len);
+	}
 	
 	/* 把pbuf中的数据复制的lwip_buf中，以写入enc28j60 */
   for(q = p; q != NULL; q = q->next) {
