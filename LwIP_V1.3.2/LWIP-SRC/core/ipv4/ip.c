@@ -78,27 +78,41 @@ const struct ip_hdr *current_header;
  * @param dest the destination IP address for which to find the route
  * @return the netif on which to send to reach dest
  */
+/* 根据目的IP地址选择一个最合适的网络接口
+ * 先查找网络接口的IP有没有和目的IP在同一个子网的，如果有，则选择该接口
+ * 如果所有接口IP和目的IP都不在同一个子网，则选择默认接口
+ */
 struct netif *
 ip_route(struct ip_addr *dest)
 {
   struct netif *netif;
 
   /* iterate through netifs */
+	/* 遍历netif_list链表，检查启动的网络接口中
+	 * 有没有和目的IP在同一个子网的
+	 */
   for(netif = netif_list; netif != NULL; netif = netif->next) {
     /* network mask matches? */
+		/* 接口已经启动 */
     if (netif_is_up(netif)) {
+			/* 接口IP和目的IP在同一个子网 */
       if (ip_addr_netcmp(dest, &(netif->ip_addr), &(netif->netmask))) {
         /* return netif on which to forward IP packet */
+				/* 返回该接口 */
         return netif;
       }
     }
   }
+	
+	/* 执行到这里，说明没找到合适的接口，返回系统的默认接口 */
   if ((netif_default == NULL) || (!netif_is_up(netif_default))) {
     LWIP_DEBUGF(IP_DEBUG | LWIP_DBG_LEVEL_SERIOUS, ("ip_route: No route to 0x%"X32_F"\n", dest->addr));
+		/* 默认接口未设置，或者默认接口设置了但未启动，返回NULL */
     IP_STATS_INC(ip.rterr);
     snmp_inc_ipoutnoroutes();
     return NULL;
   }
+	/* 返回默认网络接口 */
   /* no matching netif found, use default netif */
   return netif_default;
 }
