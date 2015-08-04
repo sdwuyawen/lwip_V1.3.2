@@ -78,6 +78,7 @@ static void icmp_send_response(struct pbuf *p, u8_t type, u8_t code);
  * @param p the icmp echo request packet, p->payload pointing to the ip header
  * @param inp the netif on which this packet was received
  */
+/* 调用途径：ethernetif_input() -> ethernet_input() -> ip_input() -> icmp_input()*/
 void
 icmp_input(struct pbuf *p, struct netif *inp)
 {
@@ -87,6 +88,7 @@ icmp_input(struct pbuf *p, struct netif *inp)
 #endif /* LWIP_DEBUG */
   struct icmp_echo_hdr *iecho;
   struct ip_hdr *iphdr;
+	/* IP 地址 */
   struct ip_addr tmpaddr;
   s16_t hlen;
 
@@ -94,35 +96,47 @@ icmp_input(struct pbuf *p, struct netif *inp)
   snmp_inc_icmpinmsgs();
 
 
+	/* 指向IP首部 */
   iphdr = p->payload;
+	/* 获得IP报头长度 */
   hlen = IPH_HL(iphdr) * 4;
+	/* pbuf的payload向后移动到IP载荷，即ICMP报头处
+	 * 如果IP的载荷小于4字节，则跳到lenerr处，释放pbuf
+	 */
   if (pbuf_header(p, -hlen) || (p->tot_len < sizeof(u16_t)*2)) {
     LWIP_DEBUGF(ICMP_DEBUG, ("icmp_input: short ICMP (%"U16_F" bytes) received\n", p->tot_len));
     goto lenerr;
   }
 
+	/* 获取ICMP报头中的类型 */
   type = *((u8_t *)p->payload);
 #ifdef LWIP_DEBUG
   code = *(((u8_t *)p->payload)+1);
 #endif /* LWIP_DEBUG */
   switch (type) {
+	/* 如果ICMP类型是回显请求 */
   case ICMP_ECHO:
+		/* 先检查目的IP地址是否合法 */
 #if !LWIP_MULTICAST_PING || !LWIP_BROADCAST_PING
     {
+			/* accepted表示是否对ICMP回显请求进行回应 */
       int accepted = 1;
 #if !LWIP_MULTICAST_PING
       /* multicast destination address? */
+			/* 如果目的IP地址是多播地址，则不回应 */
       if (ip_addr_ismulticast(&iphdr->dest)) {
         accepted = 0;
       }
 #endif /* LWIP_MULTICAST_PING */
 #if !LWIP_BROADCAST_PING
       /* broadcast destination address? */
+			/* 如果目的IP地址是广播地址，则不回应 */
       if (ip_addr_isbroadcast(&iphdr->dest, inp)) {
         accepted = 0;
       }
 #endif /* LWIP_BROADCAST_PING */
       /* broadcast or multicast destination address not acceptd? */
+			/* 如果不回应，则释放pbuf后，返回 */
       if (!accepted) {
         LWIP_DEBUGF(ICMP_DEBUG, ("icmp_input: Not echoing to multicast or broadcast pings\n"));
         ICMP_STATS_INC(icmp.err);
@@ -132,12 +146,16 @@ icmp_input(struct pbuf *p, struct netif *inp)
     }
 #endif /* !LWIP_MULTICAST_PING || !LWIP_BROADCAST_PING */
     LWIP_DEBUGF(ICMP_DEBUG, ("icmp_input: ping\n"));
+		/* 检查ICMP报文长度是否合法,ICMP报文总长度不能小于ICMP报头长度8字节 */
     if (p->tot_len < sizeof(struct icmp_echo_hdr)) {
       LWIP_DEBUGF(ICMP_DEBUG, ("icmp_input: bad ICMP echo received\n"));
+			/* 跳到lenerr处执行返回操作 */
       goto lenerr;
     }
+		/* 计算ICMP的校验和是否正确 */
     if (inet_chksum_pbuf(p) != 0) {
       LWIP_DEBUGF(ICMP_DEBUG, ("icmp_input: checksum failed for received ICMP echo\n"));
+			/* ICMP校验和错误，则释放pbuf，并返回 */
       pbuf_free(p);
       ICMP_STATS_INC(icmp.chkerr);
       snmp_inc_icmpinerrors();
@@ -188,12 +206,19 @@ icmp_input(struct pbuf *p, struct netif *inp)
     /* At this point, all checks are OK. */
     /* We generate an answer by switching the dest and src ip addresses,
      * setting the icmp type to ECHO_RESPONSE and updating the checksum. */
+		/* 校验完成，调整ICMP回显请求的相关字段，生成回显应答 
+		 * 交换IP数据报的源IP和目的IP地址，填写ICMP报文的类型字段，并重新计算ICMP的校验和
+		 */
+		/* 获取ICMP报头指针 */
     iecho = p->payload;
+		/* 交换IP报头的源IP地址和目的IP地址 */
     tmpaddr.addr = iphdr->src.addr;
     iphdr->src.addr = iphdr->dest.addr;
     iphdr->dest.addr = tmpaddr.addr;
+		/* 设置ICMP报文类型为回显应答 */
     ICMPH_TYPE_SET(iecho, ICMP_ER);
     /* adjust the checksum */
+		/* 调整ICMP的校验和 */
     if (iecho->chksum >= htons(0xffff - (ICMP_ECHO << 8))) {
       iecho->chksum += htons(ICMP_ECHO << 8) + 1;
     } else {
@@ -201,11 +226,18 @@ icmp_input(struct pbuf *p, struct netif *inp)
     }
 
     /* Set the correct TTL and recalculate the header checksum. */
+		/* 设置IP首部的TTL */
     IPH_TTL_SET(iphdr, ICMP_TTL);
+		/* 计算IP首部校验和 */
     IPH_CHKSUM_SET(iphdr, 0);
 #if CHECKSUM_GEN_IP
     IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, IP_HLEN));
 #endif /* CHECKSUM_GEN_IP */
+		/* 注意：这里没有修改IP首部的标识字段，所以ICMP回显应答的IP首部的标识字段和
+		 * ICMP回显请求的标识字段是相同的。理论上来说ICMP回显应答的IP首部标识字段应该
+		 * 被修改，但为什么不修改？
+		 * 对Linux主机进行ping，Linux主机回复的ICMP回显应答的IP首部的标识字段就修改了
+		 */
 
     ICMP_STATS_INC(icmp.xmit);
     /* increase number of messages attempted to send */
@@ -213,10 +245,16 @@ icmp_input(struct pbuf *p, struct netif *inp)
     /* increase number of echo replies attempted to send */
     snmp_inc_icmpoutechoreps();
 
+		/* pbuf的payload由ICMP的报头移动到IP的报头，hlen保存了IP报头的长度 */
     if(pbuf_header(p, hlen)) {
       LWIP_ASSERT("Can't move over header in packet", 0);
+			/* 移动失败 */
     } else {
+			/* 移动成功 */
       err_t ret;
+			/* 调用ip_output_if发送IP数据报，IP_HDRINCL表示IP首部已经填写好，并且
+			 * pbuf的payload指向IP数据报首部，而不是IP载荷首部
+			 */
       ret = ip_output_if(p, &(iphdr->src), IP_HDRINCL,
                    ICMP_TTL, 0, IP_PROTO_ICMP, inp);
       if (ret != ERR_OK) {
@@ -224,12 +262,16 @@ icmp_input(struct pbuf *p, struct netif *inp)
       }
     }
     break;
+		
+	/* 如果ICMP类型不是ICMP回显请求，则直接忽略 */
   default:
     LWIP_DEBUGF(ICMP_DEBUG, ("icmp_input: ICMP type %"S16_F" code %"S16_F" not supported.\n", 
                 (s16_t)type, (s16_t)code));
+		/* 更新统计量 */
     ICMP_STATS_INC(icmp.proterr);
     ICMP_STATS_INC(icmp.drop);
   }
+	/* 释放pbuf */
   pbuf_free(p);
   return;
 lenerr:
