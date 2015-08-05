@@ -709,19 +709,25 @@ udp_bind(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
  *
  * @see udp_disconnect()
  */
+/* 为UDP控制块设置远端IP和远端端口，并设置UDP_FLAGS_CONNECTED标志 */
 err_t
 udp_connect(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
 {
   struct udp_pcb *ipcb;
 
+	/* 如果本地端口号未绑定，则绑定到本地随机端口 */
   if (pcb->local_port == 0) {
     err_t err = udp_bind(pcb, &pcb->local_ip, pcb->local_port);
+		/* 绑定失败，则返回错误信息 */
     if (err != ERR_OK)
       return err;
   }
 
+	/* 设置UDP控制块的remote_ip字段 */
   ip_addr_set(&pcb->remote_ip, ipaddr);
+	/* 设置UDP控制块的remote_port字段，主机字节序 */
   pcb->remote_port = port;
+	/* 设置UDP控制块状态为连接状态 */
   pcb->flags |= UDP_FLAGS_CONNECTED;
 /** TODO: this functionality belongs in upper layers */
 #ifdef LWIP_UDP_TODO
@@ -749,13 +755,16 @@ udp_connect(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
                (u16_t)((ntohl(pcb->remote_ip.addr) >> 8) & 0xff),
                (u16_t)(ntohl(pcb->remote_ip.addr) & 0xff), pcb->remote_port));
 
+	/* 遍历udp_pcbs链表，查找pcb是否在链表中 */
   /* Insert UDP PCB into the list of active UDP PCBs. */
   for (ipcb = udp_pcbs; ipcb != NULL; ipcb = ipcb->next) {
+		/* 如果pcb已经在链表中，则返回 */
     if (pcb == ipcb) {
       /* already on the list, just return */
       return ERR_OK;
     }
   }
+	/* pcb不在udp_pcbs链表中，则插入到链表首部 */
   /* PCB not yet on the list, add PCB now */
   pcb->next = udp_pcbs;
   udp_pcbs = pcb;
@@ -767,13 +776,17 @@ udp_connect(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
  *
  * @param pcb the udp pcb to disconnect.
  */
+/* 清除远端IP和远端端口，将控制块设置为非连接状态 */
 void
 udp_disconnect(struct udp_pcb *pcb)
 {
   /* reset remote address association */
+	/* 远端IP清0 */
   ip_addr_set(&pcb->remote_ip, IP_ADDR_ANY);
+	/* 远端端口清0 */
   pcb->remote_port = 0;
   /* mark PCB as unconnected */
+	/* 清除连接状态标志 */
   pcb->flags &= ~UDP_FLAGS_CONNECTED;
 }
 
@@ -786,6 +799,7 @@ udp_disconnect(struct udp_pcb *pcb)
  * @param recv function pointer of the callback function
  * @param recv_arg additional argument to pass to the callback function
  */
+/* 为UDP控制块注册回调函数 */
 void
 udp_recv(struct udp_pcb *pcb,
          void (* recv)(void *arg, struct udp_pcb *upcb, struct pbuf *p,
@@ -793,7 +807,9 @@ udp_recv(struct udp_pcb *pcb,
          void *recv_arg)
 {
   /* remember recv() callback and user data */
+	/* 填写UDP控制块的recv字段 */
   pcb->recv = recv;
+	/* 填写UDP控制块的recv_arg字段 */
   pcb->recv_arg = recv_arg;
 }
 
@@ -805,6 +821,7 @@ udp_recv(struct udp_pcb *pcb,
  *
  * @see udp_new()
  */
+/* 把UDP控制块从udp_pcbs链表删除，并释放UDP控制块占用的内存 */
 void
 udp_remove(struct udp_pcb *pcb)
 {
@@ -812,18 +829,23 @@ udp_remove(struct udp_pcb *pcb)
 
   snmp_delete_udpidx_tree(pcb);
   /* pcb to be removed is first in list? */
+	/* 如果pcb是链表第一个节点，需要调整链表头指针 */
   if (udp_pcbs == pcb) {
     /* make list start at 2nd pcb */
     udp_pcbs = udp_pcbs->next;
     /* pcb not 1st in list */
-  } else
+  }
+	/* pcb不是链表第一个节点，则需要调整它的前一个节点的next指针 */
+	else
     for (pcb2 = udp_pcbs; pcb2 != NULL; pcb2 = pcb2->next) {
       /* find pcb in udp_pcbs list */
+			/* 找到待删除节点的前一个节点，并调整它的next指针 */
       if (pcb2->next != NULL && pcb2->next == pcb) {
         /* remove pcb from list */
         pcb2->next = pcb->next;
       }
     }
+	/* 释放被删除的节点占用的内存 */
   memp_free(MEMP_UDP_PCB, pcb);
 }
 
