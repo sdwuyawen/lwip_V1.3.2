@@ -306,6 +306,9 @@ void ENC28J60_Packet_Send(u32 len,u8* packet)
 		ENC_TX_Reset_Cnt ++;	//发送逻辑复位次数+1
 	}
 	
+	//清0 TXIF
+	ENC28J60_Write_Op(ENC28J60_BIT_FIELD_CLR,EIR,EIR_TXIF);
+	
 	//设置发送缓冲区地址写指针入口
 	ENC28J60_Write(EWRPTL,TXSTART_INIT&0xFF);
 	ENC28J60_Write(EWRPTH,TXSTART_INIT>>8);
@@ -326,7 +329,11 @@ void ENC28J60_Packet_Send(u32 len,u8* packet)
 // 		ENC28J60_Write_Op(ENC28J60_BIT_FIELD_CLR,ECON1,ECON1_TXRTS);
 // 	}
 
-	
+	//等待发送完成
+	while((ENC28J60_Read(EIR)&EIR_TXIF) == 0)
+	{
+		
+	}
 }
 
 
