@@ -377,8 +377,8 @@ void (udp_server_callback)(void *arg, struct udp_pcb *upcb, struct pbuf *p,
 	struct ip_addr my_ipaddr;
 	unsigned char *psrcaddr = (unsigned char *)addr;
 	IP4_ADDR(&my_ipaddr, psrcaddr[0], psrcaddr[1], psrcaddr[2], psrcaddr[3]);			/* addr是网络字节序，低地址[0]是高字节 */
-	udp_sendto(upcb, p, &my_ipaddr, port);
-	pbuf_free(p);
+	udp_sendto(upcb, p, &my_ipaddr, port);																				/* 发送到upcd控制块，目的IP，目的端口 */
+	pbuf_free(p);																																	/* 用户回调函数处理完pbuf后，必须释放pbuf */
 }
 
 #define UDP_CLIENT_PORT		7					/* 本地端口号 */
