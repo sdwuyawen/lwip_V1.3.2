@@ -53,6 +53,60 @@
 
 #include <string.h>
 
+/*
+ping xxx.xxx.xxx.xxx -l 6000µÄ²âÊÔ½á¹û:
+
+ip_input: iphdr->dest 0xe9c9c2ca netif->ip_addr 0xe9c9c2ca (0xc9c2ca, 0xc9c2ca, 0xe9000000)
+ip_input: packet accepted on interface en
+IP packet is a fragment (id=0x313d tot_len=1500 len=1500 MF=1 offset=0), calling ip_reass()
+ip_input: iphdr->dest 0xe9c9c2ca netif->ip_addr 0xe9c9c2ca (0xc9c2ca, 0xc9c2ca, 0xe9000000)
+ip_input: packet accepted on interface en
+IP packet is a fragment (id=0x313d tot_len=1500 len=1500 MF=1 offset=1480), calling ip_reass()
+ip_input: iphdr->dest 0xe9c9c2ca netif->ip_addr 0xe9c9c2ca (0xc9c2ca, 0xc9c2ca, 0xe9000000)
+ip_input: packet accepted on interface en
+IP packet is a fragment (id=0x313d tot_len=1500 len=1500 MF=1 offset=2960), calling ip_reass()
+ip_input: iphdr->dest 0xe9c9c2ca netif->ip_addr 0xe9c9c2ca (0xc9c2ca, 0xc9c2ca, 0xe9000000)
+ip_input: packet accepted on interface en
+IP packet is a fragment (id=0x313d tot_len=1500 len=1500 MF=1 offset=4440), calling ip_reass()
+ip_input: iphdr->dest 0xe9c9c2ca netif->ip_addr 0xe9c9c2ca (0xc9c2ca, 0xc9c2ca, 0xe9000000)
+ip_input: packet accepted on interface en
+IP packet is a fragment (id=0x313d tot_len=108 len=108 MF=0 offset=5920), calling ip_reass()
+ip_input: 
+IP header:
++-------------------------------+
+| 4 | 5 |  0x00 |      6028     | (v, hl, tos, len)
++-------------------------------+
+|    12605      |000|       0   | (id, flags, offset)
++-------------------------------+
+|   64  |    1  |    0x08ff     | (ttl, proto, chksum)
++-------------------------------+
+|  202  |  xxx  |  xxx  |  198  | (src)
++-------------------------------+
+|  202  |  xxx  |  xxx  |  233  | (dest)
++-------------------------------+
+ip_input: p->len 1500 p->tot_len 6028
+icmp_input: ping
+ip_output_if: en0
+IP header:
++-------------------------------+
+| 4 | 5 |  0x00 |      6028     | (v, hl, tos, len)
++-------------------------------+
+|    12605      |000|       0   | (id, flags, offset)
++-------------------------------+
+|  255  |    1  |    0x49fe     | (ttl, proto, chksum)
++-------------------------------+
+|  202  |  xxx  |  xxx  |  233  | (src)
++-------------------------------+
+|  202  |  xxx  |  xxx  |  198  | (dest)
++-------------------------------+
+low_level_output() send 1514 length packet
+low_level_output() send 1514 length packet
+low_level_output() send 1514 length packet
+low_level_output() send 1514 length packet
+low_level_output() send 122 length packet
+
+*/
+
 /** Small optimization: set to 0 if incoming PBUF_POOL pbuf always can be
  * used to modify and send a response packet (and to 1 if this is not the case,
  * e.g. when link header is stripped of when receiving) */
