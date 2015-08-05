@@ -82,26 +82,43 @@ struct udp_pcb *udp_pcbs;
  * @param inp network interface on which the datagram was received.
  *
  */
-/* ethernetif_input() -> ethernet_input() -> ip_input() -> udp_input() */
+/* ethernetif_input() -> ethernet_input() -> ip_input() -> udp_input() 
+ * 输入含有UDP数据报的IP数据报pbuf，和接收该数据报的以太网接口指针
+ * 1，函数找到对应目的端口号的UDP控制块并调用用户回调函数recv()，用户函数recv()
+ * 负责释放pbuf
+ * 2，如果找到匹配UDP控制块，但回调函数为空，则释放pbuf后，不返回任何错误
+ * 3，如果找不到匹配的UDP控制块，且UDP数据报的目的IP是本机，则返回ICMP端口不可达差错报文
+ */
 void
 udp_input(struct pbuf *p, struct netif *inp)
 {
+	/* UDP报文首部 */
   struct udp_hdr *udphdr;
+	/* UDP控制块，用于找到对应的UDP控制块 */
   struct udp_pcb *pcb, *prev;
+	/* 第一个匹配的处于非连接状态的UDP控制块 */
   struct udp_pcb *uncon_pcb;
+	/* IP数据报首部 */
   struct ip_hdr *iphdr;
+	/* 源端口、目的端口 */
   u16_t src, dest;
+	/* 控制块是否匹配 */
   u8_t local_match;
+	/* UDP数据报是否是广播 */
   u8_t broadcast;
 
   PERF_START;
 
   UDP_STATS_INC(udp.recv);
 
+	/* IP数据报首部 */
   iphdr = p->payload;
 
   /* Check minimum length (IP header + UDP header)
    * and move payload pointer to UDP header */
+	/* IP数据报长度不能小于IP首部中首部长度字段标识的首部长度 + UDP首部长度
+	 * 同时，移动pbuf的payload，使其指向UDP数据报首部
+	 */
   if (p->tot_len < (IPH_HL(iphdr) * 4 + UDP_HLEN) || pbuf_header(p, -(s16_t)(IPH_HL(iphdr) * 4))) {
     /* drop short packets */
     LWIP_DEBUGF(UDP_DEBUG,
@@ -109,18 +126,22 @@ udp_input(struct pbuf *p, struct netif *inp)
     UDP_STATS_INC(udp.lenerr);
     UDP_STATS_INC(udp.drop);
     snmp_inc_udpinerrors();
+		/* 校验不成功或移动payload不成功，释放pbuf，并跳转到end执行 */
     pbuf_free(p);
     goto end;
   }
 
+	/* 获取UDP首部指针 */
   udphdr = (struct udp_hdr *)p->payload;
 
+	/* 判断IP首部中目的IP地址是不是对应网络接口的广播地址 */
   /* is broadcast packet ? */
   broadcast = ip_addr_isbroadcast(&(iphdr->dest), inp);
 
   LWIP_DEBUGF(UDP_DEBUG, ("udp_input: received datagram of length %"U16_F"\n", p->tot_len));
 
   /* convert src and dest ports to host byte order */
+	/* 获取主机字节序的UDP源端口和目的端口号 */
   src = ntohs(udphdr->src);
   dest = ntohs(udphdr->dest);
 
@@ -156,12 +177,18 @@ udp_input(struct pbuf *p, struct netif *inp)
 #endif /* LWIP_DHCP */
   {
     prev = NULL;
+		/* 当前控制块的匹配情况 */
     local_match = 0;
+		/* 第一个匹配的非活动UDP控制块 */
     uncon_pcb = NULL;
     /* Iterate through the UDP pcb list for a matching pcb.
      * 'Perfect match' pcbs (connected to the remote port & ip address) are
      * preferred. If no perfect match is found, the first unconnected pcb that
      * matches the local port and ip address gets the datagram. */
+		/* 从UDP控制块链表中查找匹配的UDP控制块
+		 * 第一匹配目标是UDP数据报的目的IP和目的端口都匹配的处于连接状态的UDP控制块
+		 * 匹配不到则选择第一个UDP数据报的目的IP和目的端口都匹配的处于非连接状态的UDP控制块
+		 */
     for (pcb = udp_pcbs; pcb != NULL; pcb = pcb->next) {
       local_match = 0;
       /* print the PCB local and remote address */
@@ -174,6 +201,10 @@ udp_input(struct pbuf *p, struct netif *inp)
                    ip4_addr3(&pcb->remote_ip), ip4_addr4(&pcb->remote_ip), pcb->remote_port));
 
       /* compare PCB local addr+port to UDP destination addr+port */
+			/* 判断UDP控制块是否和UDP数据报匹配
+			 * 匹配条件：(UDP数据报的目的IP不是广播 && UDP控制块的本地IP是0)
+			 * 或(UDP数据报的目的IP和UDP控制块的本地IP匹配)
+			 */
       if ((pcb->local_port == dest) &&
           ((!broadcast && ip_addr_isany(&pcb->local_ip)) ||
            ip_addr_cmp(&(pcb->local_ip), &(iphdr->dest)) ||
@@ -185,32 +216,54 @@ udp_input(struct pbuf *p, struct netif *inp)
 #else  /* IP_SOF_BROADCAST_RECV */
            (broadcast))) {
 #endif /* IP_SOF_BROADCAST_RECV */
+				/* 当前控制块匹配 */
         local_match = 1;
+				/* 当前控制块未连接且uncon_pcb为空 */
         if ((uncon_pcb == NULL) && 
             ((pcb->flags & UDP_FLAGS_CONNECTED) == 0)) {
           /* the first unconnected matching PCB */
+					/* 记录第一个匹配的未连接的UDP控制块 */
           uncon_pcb = pcb;
         }
       }
+			/* 目的端口号和目的IP地址匹配成功，继续匹配源端口号和源IP地址，
+			 * 源端口号和源IP地址匹配成功，说明UDP控制块的远端端口号不为0，UDP控制块是连接状态
+			 */
       /* compare PCB remote addr+port to UDP source addr+port */
       if ((local_match != 0) &&
           (pcb->remote_port == src) &&
           (ip_addr_isany(&pcb->remote_ip) ||
            ip_addr_cmp(&(pcb->remote_ip), &(iphdr->src)))) {
         /* the first fully matching PCB */
+				/* 目的IP：目的端口，源IP：源端口完全匹配
+				 * 且当前UDP控制块是连接状态，则是第一个完全匹配的UDP控制块
+				 */
+				/* prev指向当前UDP控制块的上一个节点，prev为NULL表明当前UDP控制块在链表第一个节点 */
         if (prev != NULL) {
+					/* 当前UDP控制块不是链表第一个节点，把它移动到第一个节点 */
           /* move the pcb to the front of udp_pcbs so that is
              found faster next time */
+					/* 删除当前节点 */
           prev->next = pcb->next;
+					/* 当前节点插入链表首部 */
           pcb->next = udp_pcbs;
           udp_pcbs = pcb;
-        } else {
+        }
+				/* 当前UDP控制块在链表首部 */
+				else {
           UDP_STATS_INC(udp.cachehit);
         }
+				/* 找到第一个完全匹配的UDP控制块后，跳出遍历 */
         break;
       }
+			/* 指向当前链表节点的上一个节点 */
       prev = pcb;
-    }
+			/* 进行下一个控制块的比较 */
+    }	/* for (pcb = udp_pcbs; pcb != NULL; pcb = pcb->next) */
+		
+		/* 遍历完UDP控制块，没有找到完全匹配的连接状态的UDP控制块，则选取
+		 * 第一个完全匹配的未连接的状态的UDP控制块(可能也为空)
+		 */
     /* no fully matching pcb found? then look for an unconnected pcb */
     if (pcb == NULL) {
       pcb = uncon_pcb;
@@ -218,6 +271,7 @@ udp_input(struct pbuf *p, struct netif *inp)
   }
 
   /* Check checksum if this is a match or if it was directed at us. */
+	/* 如果找到匹配的UDP控制块，或者UDP数据报的目的IP确实是接收数据报的接口 */
   if (pcb != NULL || ip_addr_cmp(&inp->ip_addr, &iphdr->dest)) {
     LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE, ("udp_input: calculating checksum\n"));
 #if LWIP_UDPLITE
@@ -256,7 +310,9 @@ udp_input(struct pbuf *p, struct netif *inp)
 #endif /* LWIP_UDPLITE */
     {
 #if CHECKSUM_CHECK_UDP
+			/* 如果UDP数据报中填写了校验和，则验证 */
       if (udphdr->chksum != 0) {
+				/* 计算包含UDP伪首部的UDP校验和 */
         if (inet_chksum_pseudo(p, (struct ip_addr *)&(iphdr->src),
                                (struct ip_addr *)&(iphdr->dest),
                                IP_PROTO_UDP, p->tot_len) != 0) {
@@ -265,51 +321,70 @@ udp_input(struct pbuf *p, struct netif *inp)
           UDP_STATS_INC(udp.chkerr);
           UDP_STATS_INC(udp.drop);
           snmp_inc_udpinerrors();
+					/* 校验失败，释放数据报，并返回 */
           pbuf_free(p);
           goto end;
         }
       }
 #endif /* CHECKSUM_CHECK_UDP */
     }
+		/* UDP校验和通过，则把pbuf的payload移动到UDP的用户数据区 */
     if(pbuf_header(p, -UDP_HLEN)) {
       /* Can we cope with this failing? Just assert for now */
       LWIP_ASSERT("pbuf_header failed\n", 0);
       UDP_STATS_INC(udp.drop);
       snmp_inc_udpinerrors();
+			/* 移动失败，则释放整个数据报 */
       pbuf_free(p);
       goto end;
     }
+		/* 如果有匹配的UDP控制块(可能该UDP控制块是未连接状态)
+		 * 调用用户回调函数
+		 */
     if (pcb != NULL) {
       snmp_inc_udpindatagrams();
       /* callback */
+			/* 如果用户在UDP控制块中注册了回调函数，则调用回调函数 */
       if (pcb->recv != NULL) {
         /* now the recv function is responsible for freeing p */
+				/* 用户回调函数，!!!!!!负责释放pbuf!!!!!! */
         pcb->recv(pcb->recv_arg, pcb, p, &iphdr->src, src);
-      } else {
+      }
+			/* 用户没有注册回调函数，则释放pbuf并返回，不返回任何错误信息给发送端 */
+			else {
         /* no recv function registered? then we have to free the pbuf! */
         pbuf_free(p);
         goto end;
       }
-    } else {
+    }
+		/*  */
+		else {
       LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE, ("udp_input: not for us.\n"));
 
 #if LWIP_ICMP
       /* No match was found, send ICMP destination port unreachable unless
          destination address was broadcast/multicast. */
+			/* 没有匹配的UDP控制块，且UDP数据报不是广播且不是多播，则返回端口不可达ICMP报文 */
       if (!broadcast &&
           !ip_addr_ismulticast(&iphdr->dest)) {
         /* move payload pointer back to ip header */
+				/* 修改pbuf的payload指针到IP首部 */
         pbuf_header(p, (IPH_HL(iphdr) * 4) + UDP_HLEN);
         LWIP_ASSERT("p->payload == iphdr", (p->payload == iphdr));
+				/* 发送ICMP端口不可达差错报文，引起差错的报文是p，ICMP会引用其IP首部+IP数据区前8字节 */
         icmp_dest_unreach(p, ICMP_DUR_PORT);
       }
 #endif /* LWIP_ICMP */
       UDP_STATS_INC(udp.proterr);
       UDP_STATS_INC(udp.drop);
       snmp_inc_udpnoports();
+			/* 释放pbuf */
       pbuf_free(p);
     }
-  } else {
+  }
+	/* UDP数据报的目的IP不是本机的网络接口 */
+	else {
+		/* 释放pbuf */
     pbuf_free(p);
   }
 end:
