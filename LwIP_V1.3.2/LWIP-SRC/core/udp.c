@@ -201,9 +201,9 @@ udp_input(struct pbuf *p, struct netif *inp)
                    ip4_addr3(&pcb->remote_ip), ip4_addr4(&pcb->remote_ip), pcb->remote_port));
 
       /* compare PCB local addr+port to UDP destination addr+port */
-			/* 判断UDP控制块是否和UDP数据报匹配
-			 * 匹配条件：(UDP数据报的目的IP不是广播 && UDP控制块的本地IP是0)
-			 * 或(UDP数据报的目的IP和UDP控制块的本地IP匹配)
+			/* 判断UDP控制块是否和UDP数据报匹配(目的端口、目的IP)
+			 * 匹配条件：(UDP数据报的目的端口和本地端口相同) && ((UDP数据报的目的IP不是广播 && UDP控制块的本地IP是0)
+			 * 或(UDP数据报的目的IP和UDP控制块的本地IP匹配))
 			 */
       if ((pcb->local_port == dest) &&
           ((!broadcast && ip_addr_isany(&pcb->local_ip)) ||

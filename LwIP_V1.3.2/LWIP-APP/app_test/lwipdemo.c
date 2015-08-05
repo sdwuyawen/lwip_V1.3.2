@@ -12,6 +12,8 @@
 #include "netif/etharp.h"
 #include "netif/ethernetif.h"
 #include "arch/sys_arch.h"
+#include "lwip/udp.h"
+#include "lwip/ip_addr.h"
 
 #include "netio.h"
 #include "loopif.h"
@@ -366,6 +368,30 @@ void loopclient_init(void)
 //   return ERR_OK;
 // }
 
+/* addr是源IP地址
+ * port是源端口号
+ */
+void (udp_server_callback)(void *arg, struct udp_pcb *upcb, struct pbuf *p,
+                       struct ip_addr *addr, u16_t port)
+{
+	struct ip_addr my_ipaddr;
+	unsigned char *psrcaddr = (unsigned char *)addr;
+	IP4_ADDR(&my_ipaddr, psrcaddr[0], psrcaddr[1], psrcaddr[2], psrcaddr[3]);			/* addr是网络字节序，低地址[0]是高字节 */
+	udp_sendto(upcb, p, &my_ipaddr, port);
+	pbuf_free(p);
+}
+
+#define UDP_CLIENT_PORT		7					/* 本地端口号 */
+/* 初始化UDP服务器 */
+void udp_demo_init(void)
+{
+	struct udp_pcb *udppcb;
+	
+	udppcb = udp_new();																/* 申请一个UDP控制块 */
+	udp_bind(udppcb, IP_ADDR_ANY, UDP_CLIENT_PORT);		/* 绑定到本地端口，接收目的地址是任何IP(非广播IP)的UDP数据报 */
+	udp_recv(udppcb, udp_server_callback, NULL);			/* 注册用户处理函数 */
+}
+
 void LwIP_APP_Init(void)
 {
 	/*LwIP初始化开始*/
@@ -439,4 +465,6 @@ void LwIP_APP_Init(void)
 	netio_init();		//初始化NETIO
 	
 	loopclient_init();	//初始化环回接口  client
+	
+	udp_demo_init();		/* 初始化UDP服务器 */
 }
