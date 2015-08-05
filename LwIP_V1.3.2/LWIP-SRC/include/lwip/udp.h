@@ -117,6 +117,7 @@ struct udp_pcb {
    * @param port the remote port from which the packet was received
    */
 	/* 接收到数据包时回调函数
+	 * 该函数要释放pbuf。注意：addr指向pbuf中的内容，释放pbuf后，addr是野指针
 	 * addr是源IP地址，使用网络字节序
 	 * port是源端口号，使用主机字节序
 	 */

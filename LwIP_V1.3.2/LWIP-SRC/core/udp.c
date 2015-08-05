@@ -334,6 +334,9 @@ end:
  *
  * @see udp_disconnect() udp_sendto()
  */
+/* 使用一个处于连接状态的UDP控制块发送用户数据pbuf
+ * 如果当前UDP控制块没有绑定到本地端口，会自动绑定到本地随机端口
+ */
 err_t
 udp_send(struct udp_pcb *pcb, struct pbuf *p)
 {
@@ -358,6 +361,7 @@ udp_send(struct udp_pcb *pcb, struct pbuf *p)
  *
  * @see udp_disconnect() udp_send()
  */
+/* 把用户数据发送到指定的远端IP地址和端口号上 */
 err_t
 udp_sendto(struct udp_pcb *pcb, struct pbuf *p,
   struct ip_addr *dst_ip, u16_t dst_port)
@@ -370,15 +374,18 @@ udp_sendto(struct udp_pcb *pcb, struct pbuf *p,
 #if LWIP_IGMP
   netif = ip_route((ip_addr_ismulticast(dst_ip))?(&(pcb->multicast_ip)):(dst_ip));
 #else
+	/* 与IP层交互，得到将要发送本报文的网络接口，以获得源IP */
   netif = ip_route(dst_ip);
 #endif /* LWIP_IGMP */
 
   /* no outgoing network interface could be found? */
+	/* 找不到合适的网络接口，则返回错误 */
   if (netif == NULL) {
     LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_LEVEL_SERIOUS, ("udp_send: No route to 0x%"X32_F"\n", dst_ip->addr));
     UDP_STATS_INC(udp.rterr);
     return ERR_RTE;
   }
+	/* 调用udp_sendto_if()组装并发送UDP报文 */
   return udp_sendto_if(pcb, p, dst_ip, dst_port, netif);
 }
 
@@ -401,13 +408,16 @@ udp_sendto(struct udp_pcb *pcb, struct pbuf *p,
  *
  * @see udp_disconnect() udp_send()
  */
+/* 组装并发送UDP报文到远端IP:远端端口，使用netif接口发送 */
 err_t
 udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
   struct ip_addr *dst_ip, u16_t dst_port, struct netif *netif)
 {
+	/* UDP首部结构指针 */
   struct udp_hdr *udphdr;
   struct ip_addr *src_ip;
   err_t err;
+	/* 指向组装好的UDP报文 */
   struct pbuf *q; /* q will be sent down the stack */
 
 #if IP_SOF_BROADCAST
@@ -420,8 +430,10 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
 #endif /* IP_SOF_BROADCAST */
 
   /* if the PCB is not yet bound to a port, bind it here */
+	/*如果UDP控制块没有绑定到本地端口，则绑定到本地随机端口，但本地IP怎么处理? */
   if (pcb->local_port == 0) {
     LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE, ("udp_send: not yet bound to a port, binding now\n"));
+		/* 绑定UDP控制块到本地IP:本地随机端口 */
     err = udp_bind(pcb, &pcb->local_ip, pcb->local_port);
     if (err != ERR_OK) {
       LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_SERIOUS, ("udp_send: forced port bind failed\n"));
@@ -429,52 +441,77 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
     }
   }
 
+	/* 开始构造UDP首部，判断用户数据的pbuf数据区前面能否放下UDP首部
+	 * 如果放不下，为UDP首部重新申请一个pbuf空间 
+	 */
   /* not enough space to add an UDP header to first pbuf in given p chain? */
   if (pbuf_header(p, UDP_HLEN)) {
     /* allocate header in a separate new pbuf */
+		/* 在内存堆中申请UDP首部空间，在IP申请，将会额外预留MAC层空间 */
     q = pbuf_alloc(PBUF_IP, UDP_HLEN, PBUF_RAM);
     /* new header pbuf could not be allocated? */
     if (q == NULL) {
+			/* 申请失败，则返回内存错误 */
       LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE | LWIP_DBG_LEVEL_SERIOUS, ("udp_send: could not allocate header\n"));
       return ERR_MEM;
     }
     /* chain header q in front of given pbuf p */
+		/* 把q和用户UDP数据p连接成pbuf链表 */
     pbuf_chain(q, p);
     /* first pbuf q points to header pbuf */
     LWIP_DEBUGF(UDP_DEBUG,
                 ("udp_send: added header pbuf %p before given pbuf %p\n", (void *)q, (void *)p));
-  } else {
+  }
+	/* 在pbuf中已经预留了UDP首部空间 */
+	else {
     /* adding space for header within p succeeded */
     /* first pbuf q equals given pbuf */
+		/* q指向以UDP首部开始的pbuf */
     q = p;
     LWIP_DEBUGF(UDP_DEBUG, ("udp_send: added header in given pbuf %p\n", (void *)p));
   }
   LWIP_ASSERT("check that first pbuf can hold struct udp_hdr",
               (q->len >= sizeof(struct udp_hdr)));
   /* q now represents the packet to be sent */
+	/* 填写UDP首部 */
   udphdr = q->payload;
+	/* 本地端口号 */
   udphdr->src = htons(pcb->local_port);
-  udphdr->dest = htons(dst_port);
+  /* 远程端口号 */
+	udphdr->dest = htons(dst_port);
   /* in UDP, 0 checksum means 'no checksum' */
+	/* 清0UDP校验和 */
   udphdr->chksum = 0x0000; 
 
+	/* 得到伪首部的值，首先得到源IP地址 */
   /* PCB local address is IP_ANY_ADDR? */
   if (ip_addr_isany(&pcb->local_ip)) {
+		/* UDP控制块中源IP地址为0，则使用IP层提供的发送该UDP数据报的网络接口的IP地址 */
     /* use outgoing network interface IP address as source address */
     src_ip = &(netif->ip_addr);
-  } else {
+  }
+	/* UDP控制块中记录了源IP地址 */
+	else {
     /* check if UDP PCB local IP address is correct
      * this could be an old address if netif->ip_addr has changed */
+		/* 如果UDP控制块中记录的源IP地址和网络接口的IP地址不一致，说明netif的IP地址修改过 */
     if (!ip_addr_cmp(&(pcb->local_ip), &(netif->ip_addr))) {
       /* local_ip doesn't match, drop the packet */
+			/* 如果为该UDP报文申请过首部空间 */
       if (q != p) {
         /* free the header pbuf */
+				/* 释放申请的首部空间，但是不释放p指向的pbuf，因为p->ref在pbuf_chain(q, p)时+1 */
         pbuf_free(q);
+				/* 指向UDP数据报pbuf的指针清0 */
         q = NULL;
         /* p is still referenced by the caller, and will live on */
       }
+			/* 返回错误信息 */
       return ERR_VAL;
     }
+		/* UDP控制块中记录的源IP地址和网络接口的IP地址一致
+		 * 则使用UDP控制块中的本地IP地址作为UDP伪首部的源IP地址
+		 */
     /* use UDP PCB local IP address as source address */
     src_ip = &(pcb->local_ip);
   }
@@ -522,13 +559,17 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
   } else
 #endif /* LWIP_UDPLITE */
   {      /* UDP */
+		/* 填写UDP首部总长度字段。计算校验和，填写到UDP首部 */
     LWIP_DEBUGF(UDP_DEBUG, ("udp_send: UDP packet length %"U16_F"\n", q->tot_len));
+		/* 填写UDP首部总长度字段，网络字节序 */
     udphdr->len = htons(q->tot_len);
     /* calculate checksum */
 #if CHECKSUM_GEN_UDP
+		/* 如果UDP控制块允许计算UDP校验和,传入q指向UDP首部，其它参数是UDP伪首部 */
     if ((pcb->flags & UDP_FLAGS_NOCHKSUM) == 0) {
       udphdr->chksum = inet_chksum_pseudo(q, src_ip, dst_ip, IP_PROTO_UDP, q->tot_len);
       /* chksum zero must become 0xffff, as zero means 'no checksum' */
+			/* 如果校验和是0，则填写0xffff，因为校验和是0表示无校验 */
       if (udphdr->chksum == 0x0000) udphdr->chksum = 0xffff;
     }
 #endif /* CHECKSUM_CHECK_UDP */
@@ -538,6 +579,7 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
 #if LWIP_NETIF_HWADDRHINT
     netif->addr_hint = &(pcb->addr_hint);
 #endif /* LWIP_NETIF_HWADDRHINT*/
+		/* 调用IP层的输出函数，填写IP首部，并发送IP数据报 */
     err = ip_output_if(q, src_ip, dst_ip, pcb->ttl, pcb->tos, IP_PROTO_UDP, netif);
 #if LWIP_NETIF_HWADDRHINT
     netif->addr_hint = NULL;
@@ -547,6 +589,7 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
   snmp_inc_udpoutdatagrams();
 
   /* did we chain a separate header pbuf earlier? */
+	/* 如果为UDP首部申请过内存，则释放该内存,传入的pbuf不会被释放 */
   if (q != p) {
     /* free the header pbuf */
     pbuf_free(q);
@@ -555,6 +598,7 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
   }
 
   UDP_STATS_INC(udp.xmit);
+	/* 返回发送结果 */
   return err;
 }
 
