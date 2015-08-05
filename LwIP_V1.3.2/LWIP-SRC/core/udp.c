@@ -577,10 +577,18 @@ udp_sendto_if(struct udp_pcb *pcb, struct pbuf *p,
  *
  * @see udp_disconnect()
  */
+/* 绑定UDP控制块到本地IP:端口。即设置UDP控制块的本地IP和本地端口，并把控制块插入udp_pcbs链表
+ * ipaddr: 使用IP_ADDR_ANY表示本地任意网络接口的IP地址
+ * port: 使用0表示为控制块随机分配一个有效的短暂端口号
+ */
 err_t
 udp_bind(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
 {
   struct udp_pcb *ipcb;
+	/* pcb是否已经在udp_pcbs链表中
+	 * 0: 不在udp_pcbs链表中
+	 * 1: 在udp_pcbs链表中，不需要再次插入链表
+	 */
   u8_t rebind;
 
   LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE, ("udp_bind(ipaddr = "));
@@ -588,6 +596,9 @@ udp_bind(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
   LWIP_DEBUGF(UDP_DEBUG | LWIP_DBG_TRACE, (", port = %"U16_F")\n", port));
 
   rebind = 0;
+	/* 检查pcb是否在udp_pcbs链表中，如果在，rebind置1
+	 * 表示不再把pcb插入到链表中。否则会形成链表环路
+	 */
   /* Check for double bind and rebind of the same pcb */
   for (ipcb = udp_pcbs; ipcb != NULL; ipcb = ipcb->next) {
     /* is this UDP PCB already on active list? */
@@ -618,35 +629,56 @@ udp_bind(struct udp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
 #endif
   }
 
+	/* 1，设置pcb控制块的local_ip为ipaddr */
   ip_addr_set(&pcb->local_ip, ipaddr);
 
   /* no port specified? */
+	/* 没有指定本地端口,则寻找一个有效的短暂端口 */
   if (port == 0) {
 #ifndef UDP_LOCAL_PORT_RANGE_START
-#define UDP_LOCAL_PORT_RANGE_START 4096
-#define UDP_LOCAL_PORT_RANGE_END   0x7fff
+#define UDP_LOCAL_PORT_RANGE_START 4096			/* 起始短暂端口号 */
+#define UDP_LOCAL_PORT_RANGE_END   0x7fff		/* 结束短暂端口号 */
 #endif
+		/* 遍历所有短暂端口号，判断该端口号是否被其他控制块占用。
+		 * 若未被占用，则使用该端口号
+		 */
+		/* 起始的短暂端口号 */
     port = UDP_LOCAL_PORT_RANGE_START;
+		/* 从UDP控制块链表头开始遍历 */
     ipcb = udp_pcbs;
+		/* 未到链表尾，且未到结束短暂端口号 */
     while ((ipcb != NULL) && (port != UDP_LOCAL_PORT_RANGE_END)) {
+			/* 如果控制块使用了端口号， */
       if (ipcb->local_port == port) {
         /* port is already used by another udp_pcb */
+				/* 检查下一个端口号 */
         port++;
         /* restart scanning all udp pcbs */
+				/* 从链表头重新遍历 */
         ipcb = udp_pcbs;
-      } else
+      }
+			/* 该控制块没有使用该端口，则继续判断下一个控制块 */
+			else
         /* go on with next udp pcb */
         ipcb = ipcb->next;
     }
+		/* ipcb == NULL时，UDP控制块链表中所有节点都没有使用port
+		 * ipcb != NULL时，说明是port == UDP_LOCAL_PORT_RANGE_END而退出循环
+		 * 即所有短暂端口号都被使用了
+		 */
     if (ipcb != NULL) {
+			/* 未找到可用的短暂端口号，返回错误信息 */
       /* no more ports available in local range */
       LWIP_DEBUGF(UDP_DEBUG, ("udp_bind: out of free UDP ports\n"));
       return ERR_USE;
     }
   }
+	
+	/* 2，设置UDP控制块中的本地端口号，主机字节序 */
   pcb->local_port = port;
   snmp_insert_udpidx_tree(pcb);
   /* pcb not active yet? */
+	/* 3，控制块没有在链表中，则插入链表首部 */
   if (rebind == 0) {
     /* place the PCB on the active list if not already there */
     pcb->next = udp_pcbs;
@@ -803,18 +835,23 @@ udp_remove(struct udp_pcb *pcb)
  *
  * @see udp_remove()
  */
+/* 新建UDP控制块 */
 struct udp_pcb *
 udp_new(void)
 {
   struct udp_pcb *pcb;
+	/* 从内存池中申请一个UDP控制块 */
   pcb = memp_malloc(MEMP_UDP_PCB);
   /* could allocate UDP PCB? */
+	/* 申请成功 */
   if (pcb != NULL) {
     /* UDP Lite: by initializing to all zeroes, chksum_len is set to 0
      * which means checksum is generated over the whole datagram per default
      * (recommended as default by RFC 3828). */
     /* initialize PCB to all zeroes */
+		/* 把控制块全部字段清0 */
     memset(pcb, 0, sizeof(struct udp_pcb));
+		/* 设置UDP控制块TTL字段 */
     pcb->ttl = UDP_TTL;
   }
   return pcb;
