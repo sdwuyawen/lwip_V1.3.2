@@ -51,11 +51,17 @@ extern "C" {
 #ifdef PACK_STRUCT_USE_INCLUDES
 #  include "arch/bpstruct.h"
 #endif
+	
+/* UDP首部，内部多字节数据是网络字节序 */
 PACK_STRUCT_BEGIN
 struct udp_hdr {
+	/* 源端口号 */
   PACK_STRUCT_FIELD(u16_t src);
+	/* 目的端口号 */
   PACK_STRUCT_FIELD(u16_t dest);  /* src/dest UDP ports */
+	/* UDP数据报总长度 */
   PACK_STRUCT_FIELD(u16_t len);
+	/* UDP校验和(包括伪首部) */
   PACK_STRUCT_FIELD(u16_t chksum);
 } PACK_STRUCT_STRUCT;
 PACK_STRUCT_END
@@ -63,20 +69,27 @@ PACK_STRUCT_END
 #  include "arch/epstruct.h"
 #endif
 
+/* 用于UDP控制块的flags字段，标识控制块的状态 */
+/* 不进行校验和的计算 */
 #define UDP_FLAGS_NOCHKSUM 0x01U
 #define UDP_FLAGS_UDPLITE  0x02U
+/* 控制块已和远端连接 */
 #define UDP_FLAGS_CONNECTED  0x04U
 
+/* 定义UDP控制块结构体 */
 struct udp_pcb {
 /* Common members of all PCB types */
+	/* 源IP、目的IP等 */
   IP_PCB;
 
 /* Protocol specific PCB members */
-
+	/* UDP控制块链表指针，链表头指针为udp_pcbs */
   struct udp_pcb *next;
 
+	/* 控制块状态 */
   u8_t flags;
   /* ports are in host byte order */
+	/* 本地端口号和远端端口号，使用主机字节序 */
   u16_t local_port, remote_port;
 
 #if LWIP_IGMP
@@ -103,9 +116,14 @@ struct udp_pcb {
    * @param addr the remote IP address from which the packet was received
    * @param port the remote port from which the packet was received
    */
+	/* 接收到数据包时回调函数
+	 * addr是源IP地址，使用网络字节序
+	 * port是源端口号，使用主机字节序
+	 */
   void (* recv)(void *arg, struct udp_pcb *pcb, struct pbuf *p,
     struct ip_addr *addr, u16_t port);
   /* user-supplied argument for the recv callback */
+	/* 调用回调函数时，传递给函数的用户定义的数据信息 */
   void *recv_arg;  
 };
 /* udp_pcbs export for exernal reference (e.g. SNMP agent) */

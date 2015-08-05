@@ -67,6 +67,7 @@
 
 /* The list of UDP PCBs */
 /* exported in udp.h (was static) */
+/* UDP控制块链表头指针 */
 struct udp_pcb *udp_pcbs;
 
 /**
@@ -81,6 +82,7 @@ struct udp_pcb *udp_pcbs;
  * @param inp network interface on which the datagram was received.
  *
  */
+/* ethernetif_input() -> ethernet_input() -> ip_input() -> udp_input() */
 void
 udp_input(struct pbuf *p, struct netif *inp)
 {

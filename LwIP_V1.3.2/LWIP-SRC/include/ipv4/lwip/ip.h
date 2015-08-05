@@ -72,6 +72,7 @@ extern "C" {
    beginning of a PCB type definition. It is located here so that
    changes to this common part are made in one location instead of
    having to change all PCB structs. */
+/* 所有协议控制块使用的结构 */
 #define IP_PCB \
   /* ip addresses in network byte order */ \
   struct ip_addr local_ip; \
@@ -85,6 +86,7 @@ extern "C" {
   /* link layer address resolution hint */ \
   IP_PCB_ADDRHINT
 
+/* IP控制块 */
 struct ip_pcb {
 /* Common members of all PCB types */
   IP_PCB;
