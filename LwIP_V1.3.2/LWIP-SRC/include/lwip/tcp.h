@@ -242,9 +242,10 @@ PACK_STRUCT_END
 
 #define TCP_TCPLEN(seg) ((seg)->len + ((TCPH_FLAGS((seg)->tcphdr) & (TCP_FIN | TCP_SYN)) != 0))
 
+/* 定义TCP连接的各个状态 */
 enum tcp_state {
-  CLOSED      = 0,
-  LISTEN      = 1,
+  CLOSED      = 0,		/* 没有连接 */
+  LISTEN      = 1,		/* 服务器进入监听状态，等待客户端的连接请求 */
   SYN_SENT    = 2,
   SYN_RCVD    = 3,
   ESTABLISHED = 4,
