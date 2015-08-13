@@ -214,15 +214,25 @@ u32_t            tcp_update_rcv_ann_wnd(struct tcp_pcb *pcb);
 #ifdef PACK_STRUCT_USE_INCLUDES
 #  include "arch/bpstruct.h"
 #endif
+
+/* TCP首部结构体，各字段都是网络字节序 */
 PACK_STRUCT_BEGIN
 struct tcp_hdr {
+	/* 源端口号 */
   PACK_STRUCT_FIELD(u16_t src);
+	/* 目的端口号 */
   PACK_STRUCT_FIELD(u16_t dest);
+	/* 序号 */
   PACK_STRUCT_FIELD(u32_t seqno);
+	/* 确认序号 */
   PACK_STRUCT_FIELD(u32_t ackno);
+	/* 首部长度4位，保留6位，标志位6位 */
   PACK_STRUCT_FIELD(u16_t _hdrlen_rsvd_flags);
+	/* 窗口大小 */
   PACK_STRUCT_FIELD(u16_t wnd);
+	/* 校验和 */
   PACK_STRUCT_FIELD(u16_t chksum);
+	/* 紧急指针 */
   PACK_STRUCT_FIELD(u16_t urgp);
 } PACK_STRUCT_STRUCT;
 PACK_STRUCT_END
@@ -246,15 +256,15 @@ PACK_STRUCT_END
 enum tcp_state {
   CLOSED      = 0,		/* 没有连接 */
   LISTEN      = 1,		/* 服务器进入监听状态，等待客户端的连接请求 */
-  SYN_SENT    = 2,
-  SYN_RCVD    = 3,
-  ESTABLISHED = 4,
-  FIN_WAIT_1  = 5,
-  FIN_WAIT_2  = 6,
-  CLOSE_WAIT  = 7,
-  CLOSING     = 8,
-  LAST_ACK    = 9,
-  TIME_WAIT   = 10
+  SYN_SENT    = 2,		/* SYN请求已发送	*/
+  SYN_RCVD    = 3,		/* SYN请求已收到 */
+  ESTABLISHED = 4,		/* 连接已经建立 */
+  FIN_WAIT_1  = 5,		/* 主动发送FIN */
+  FIN_WAIT_2  = 6,		/* 主动发送FIN后，收到ACK */
+  CLOSE_WAIT  = 7,		/* 被动收到FIN，等待应用关闭另一个方向连接 */
+  CLOSING     = 8,		/* 两端同时收到对方的关闭请求 */
+  LAST_ACK    = 9,		/* 被动关闭方等待对方最后一个ACK */
+  TIME_WAIT   = 10		/* 主动关闭方2MSL等待状态 */
 };
 
 /** Flags used on input processing, not on pcb->flags
