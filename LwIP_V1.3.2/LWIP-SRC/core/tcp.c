@@ -389,10 +389,12 @@ tcp_listen_with_backlog(struct tcp_pcb *pcb, u8_t backlog)
   if (pcb->state == LISTEN) {
     return pcb;
   }
+	/* 分配一个监听状态控制块struct tcp_pcb_listen */
   lpcb = memp_malloc(MEMP_TCP_PCB_LISTEN);
   if (lpcb == NULL) {
     return NULL;
   }
+	/* 复制各个字段 */
   lpcb->callback_arg = pcb->callback_arg;
   lpcb->local_port = pcb->local_port;
   lpcb->state = LISTEN;
@@ -401,7 +403,9 @@ tcp_listen_with_backlog(struct tcp_pcb *pcb, u8_t backlog)
   lpcb->ttl = pcb->ttl;
   lpcb->tos = pcb->tos;
   ip_addr_set(&lpcb->local_ip, &pcb->local_ip);
+	/* 从tcp_bound_pcbs链表删除控制块 */
   TCP_RMV(&tcp_bound_pcbs, pcb);
+	/* 释放控制块 */
   memp_free(MEMP_TCP_PCB, pcb);
 #if LWIP_CALLBACK_API
   lpcb->accept = tcp_accept_null;
@@ -410,7 +414,9 @@ tcp_listen_with_backlog(struct tcp_pcb *pcb, u8_t backlog)
   lpcb->accepts_pending = 0;
   lpcb->backlog = (backlog ? backlog : 1);
 #endif /* TCP_LISTEN_BACKLOG */
+	/* 把新控制块加入tcp_listen_pcbs链表 */
   TCP_REG(&tcp_listen_pcbs.listen_pcbs, lpcb);
+	/* 返回新控制块指针 */
   return (struct tcp_pcb *)lpcb;
 }
 
