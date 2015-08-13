@@ -290,6 +290,9 @@ enum tcp_state {
 /**
  * members common to struct tcp_pcb and struct tcp_listen_pcb
  */
+/* LISTEN状态TCP控制块和
+ * 其它状态TCP控制块共有的字段
+ */
 #define TCP_PCB_COMMON(type) \
   type *next; /* for the linked list */ \
   enum tcp_state state; /* TCP state */ \
@@ -301,9 +304,11 @@ enum tcp_state {
   DEF_ACCEPT_CALLBACK
 
 
+/* TCP控制块 */
 /* the TCP protocol control block */
 struct tcp_pcb {
 /** common PCB members */
+	/* 包含本地IP、远端IP */
   IP_PCB;
 /** protocol specific PCB members */
   TCP_PCB_COMMON(struct tcp_pcb);
@@ -323,13 +328,16 @@ struct tcp_pcb {
   /* the rest of the fields are in host byte order
      as we have to do some math with them */
   /* receiver variables */
+	/* 接收窗口相关字段 */
   u32_t rcv_nxt;   /* next seqno expected */
   u16_t rcv_wnd;   /* receiver window available */
   u16_t rcv_ann_wnd; /* receiver window to announce */
   u32_t rcv_ann_right_edge; /* announced right edge of window */
 
   /* Timers */
-  u32_t tmr;
+  /* 控制块上一次活动时的时刻 */
+	u32_t tmr;
+	/* 用于周期性的poll。当polltmr==pollinterval时，poll函数会被调用 */
   u8_t polltmr, pollinterval;
   
   /* Retransmission timer. */
@@ -337,22 +345,28 @@ struct tcp_pcb {
   
   u16_t mss;   /* maximum segment size */
   
+	/* RTT估计用变量 */
   /* RTT (round trip time) estimation variables */
   u32_t rttest; /* RTT estimate in 500ms ticks */
   u32_t rtseq;  /* sequence number being timed */
   s16_t sa, sv; /* @todo document this */
 
+	/* 重发超时时间 */
   s16_t rto;    /* retransmission time-out */
+	/* 重发次数 */
   u8_t nrtx;    /* number of retransmissions */
 
   /* fast retransmit/recovery */
+	/* 快速重传/恢复 */
   u32_t lastack; /* Highest acknowledged seqno. */
   u8_t dupacks;
   
+	/* 阻塞控制 */
   /* congestion avoidance/control variables */
   u16_t cwnd;  
   u16_t ssthresh;
 
+	/* 发送窗口相关 */
   /* sender variables */
   u32_t snd_nxt;   /* next new seqno to be sent */
   u16_t snd_wnd;   /* sender window */
@@ -360,13 +374,16 @@ struct tcp_pcb {
                              window update. */
   u32_t snd_lbb;       /* Sequence number of next byte to be buffered. */
 
+	/* 上一次成功发送的字节数 */
   u16_t acked;
   
+	/* 可用发送缓冲区大小 */
   u16_t snd_buf;   /* Available buffer space for sending (in bytes). */
 #define TCP_SNDQUEUELEN_OVERFLOW (0xffff-3)
+	/* 缓冲数据占用的pbuf个数 */
   u16_t snd_queuelen; /* Available buffer space for sending (in tcp_segs). */
   
-  
+	/* 用户数据缓冲队列指针 */
   /* These are ordered by sequence number: */
   struct tcp_seg *unsent;   /* Unsent (queued) segments. */
   struct tcp_seg *unacked;  /* Sent but unacknowledged segments. */
@@ -374,8 +391,10 @@ struct tcp_pcb {
   struct tcp_seg *ooseq;    /* Received out of sequence segments. */
 #endif /* TCP_QUEUE_OOSEQ */
 
+	/* 上一次成功接收但未被应用层取用的pbuf */
   struct pbuf *refused_data; /* Data previously received but not yet taken by upper layer */
 
+	/* 回调函数指针 */
 #if LWIP_CALLBACK_API
   /* Function to be called when more send buffer space is available.
    * @param arg user-supplied argument (tcp_pcb.callback_arg)
@@ -427,22 +446,26 @@ struct tcp_pcb {
   u32_t ts_recent;
 #endif /* LWIP_TCP_TIMESTAMPS */
 
+	/* 保活定时器上限 */
   /* idle time before KEEPALIVE is sent */
   u32_t keep_idle;
 #if LWIP_TCP_KEEPALIVE
   u32_t keep_intvl;
   u32_t keep_cnt;
 #endif /* LWIP_TCP_KEEPALIVE */
-  
+  /* 坚持定时器计数值 */
   /* Persist timer counter */
   u32_t persist_cnt;
+	/* 坚持定时器窗口探查报文发送的数目 */
   /* Persist timer back-off */
   u8_t persist_backoff;
 
+	/* 保活报文发送次数 */
   /* KEEPALIVE counter */
   u8_t keep_cnt_sent;
 };
 
+/* 用于LISTEN状态的TCP控制块 */
 struct tcp_pcb_listen {  
 /* Common members of all PCB types */
   IP_PCB;
