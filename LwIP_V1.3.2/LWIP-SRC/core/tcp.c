@@ -134,6 +134,7 @@ tcp_close(struct tcp_pcb *pcb)
 #endif /* TCP_DEBUG */
 
   switch (pcb->state) {
+	/* 若TCP在CLOSE状态，即tcp_new()之后从未使用过 */
   case CLOSED:
     /* Closing a pcb in the CLOSED state might seem erroneous,
      * however, it is in this state once allocated and as yet unused
@@ -143,13 +144,17 @@ tcp_close(struct tcp_pcb *pcb)
      * is erroneous, but this should never happen as the pcb has in those cases
      * been freed, and so any remaining handles are bogus. */
     err = ERR_OK;
+		/* 从tcp_bound_pcbs链表上删除(如果已经调用tcp_bind()的话) */
     TCP_RMV(&tcp_bound_pcbs, pcb);
+		/* 释放TCP控制所占内存 */
     memp_free(MEMP_TCP_PCB, pcb);
     pcb = NULL;
     break;
   case LISTEN:
     err = ERR_OK;
+		/* 从LISTEN链表上删除，并发送可能存在的delayed ACKs */
     tcp_pcb_remove((struct tcp_pcb **)&tcp_listen_pcbs.pcbs, pcb);
+		/* 释放LISTEN类型的TCP控制块 */
     memp_free(MEMP_TCP_PCB_LISTEN, pcb);
     pcb = NULL;
     break;
@@ -161,26 +166,33 @@ tcp_close(struct tcp_pcb *pcb)
     snmp_inc_tcpattemptfails();
     break;
   case SYN_RCVD:
+		/* 构造FIN报文，主动关闭 */
     err = tcp_send_ctrl(pcb, TCP_FIN);
     if (err == ERR_OK) {
       snmp_inc_tcpattemptfails();
+			/* 进入FIN_WAIT_1状态 */
       pcb->state = FIN_WAIT_1;
     }
     break;
   case ESTABLISHED:
+		/* 构造FIN报文，主动关闭 */
     err = tcp_send_ctrl(pcb, TCP_FIN);
     if (err == ERR_OK) {
       snmp_inc_tcpestabresets();
+			/* 进入FIN_WAIT_1状态 */
       pcb->state = FIN_WAIT_1;
     }
     break;
+	/* 被动关闭，收到对方的FIN后，构造FIN关闭另一个方向传输 */
   case CLOSE_WAIT:
     err = tcp_send_ctrl(pcb, TCP_FIN);
     if (err == ERR_OK) {
       snmp_inc_tcpestabresets();
+			/* 进入LAST_ACK状态 */
       pcb->state = LAST_ACK;
     }
     break;
+	/* 其他状态，用TCP定时器函数实现 */
   default:
     /* Has already been closed, do nothing. */
     err = ERR_OK;
@@ -188,6 +200,7 @@ tcp_close(struct tcp_pcb *pcb)
     break;
   }
 
+	/* 发送TCP控制块中剩余的报文段，包括FIN报文	*/
   if (pcb != NULL && err == ERR_OK) {
     /* To ensure all data has been sent when tcp_close returns, we have
        to make sure tcp_output doesn't fail.
