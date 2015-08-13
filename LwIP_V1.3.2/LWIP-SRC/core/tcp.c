@@ -1011,12 +1011,14 @@ tcp_alloc(u8_t prio)
   if (pcb == NULL) {
     /* Try killing oldest connection in TIME-WAIT. */
     LWIP_DEBUGF(TCP_DEBUG, ("tcp_alloc: killing off oldest TIME-WAIT connection\n"));
+		/* 回收最老的TIME_WAIT状态控制块 */
     tcp_kill_timewait();
     /* Try to allocate a tcp_pcb again. */
     pcb = memp_malloc(MEMP_TCP_PCB);
     if (pcb == NULL) {
       /* Try killing active connections with lower priority than the new one. */
       LWIP_DEBUGF(TCP_DEBUG, ("tcp_alloc: killing connection with prio lower than %d\n", prio));
+			/* 回收优先级比prio低的最老的TCP控制块 */
       tcp_kill_prio(prio);
       /* Try to allocate a tcp_pcb again. */
       pcb = memp_malloc(MEMP_TCP_PCB);
@@ -1030,44 +1032,58 @@ tcp_alloc(u8_t prio)
       MEMP_STATS_DEC(err, MEMP_TCP_PCB);
     }
   }
+	/* TCP控制块申请成功 */
   if (pcb != NULL) {
     memset(pcb, 0, sizeof(struct tcp_pcb));
     pcb->prio = TCP_PRIO_NORMAL;
     pcb->snd_buf = TCP_SND_BUF;
+		/* 发送缓冲区已占用的pbuf个数 */
     pcb->snd_queuelen = 0;
+		/* 接收窗口 */
     pcb->rcv_wnd = TCP_WND;
     pcb->rcv_ann_wnd = TCP_WND;
     pcb->tos = 0;
     pcb->ttl = TCP_TTL;
     /* As initial send MSS, we use TCP_MSS but limit it to 536.
        The send MSS is updated when an MSS option is received. */
+		/* 初始化最大报文段长度，最大536 */
     pcb->mss = (TCP_MSS > 536) ? 536 : TCP_MSS;
+		/* 重传超时时间 */
     pcb->rto = 3000 / TCP_SLOW_INTERVAL;
+		/* RTT估计相关 */
     pcb->sa = 0;
     pcb->sv = 3000 / TCP_SLOW_INTERVAL;
+		/* 重传定时器 */
     pcb->rtime = -1;
+		/* 阻塞窗口大小 */
     pcb->cwnd = 1;
+		/* 获得初始序号 */
     iss = tcp_next_iss();
     pcb->snd_wl2 = iss;
     pcb->snd_nxt = iss;
     pcb->lastack = iss;
-    pcb->snd_lbb = iss;   
+    pcb->snd_lbb = iss;
+		
+		/* 控制块上一次活动时的时刻 */
     pcb->tmr = tcp_ticks;
 
+		/* 清空周期事件定时器 */
     pcb->polltmr = 0;
 
 #if LWIP_CALLBACK_API
+		/* 默认接收数据回调函数 */
     pcb->recv = tcp_recv_null;
 #endif /* LWIP_CALLBACK_API */  
     
     /* Init KEEPALIVE timer */
+		/* 保活定时器上限 */
     pcb->keep_idle  = TCP_KEEPIDLE_DEFAULT;
     
 #if LWIP_TCP_KEEPALIVE
     pcb->keep_intvl = TCP_KEEPINTVL_DEFAULT;
     pcb->keep_cnt   = TCP_KEEPCNT_DEFAULT;
 #endif /* LWIP_TCP_KEEPALIVE */
-
+		/* 保活报文发送的次数 */
     pcb->keep_cnt_sent = 0;
   }
   return pcb;
@@ -1085,6 +1101,7 @@ tcp_alloc(u8_t prio)
  *
  * @return a new tcp_pcb that initially is in state CLOSED
  */
+/* 创建一个TCP控制块并初始化 */
 struct tcp_pcb *
 tcp_new(void)
 {

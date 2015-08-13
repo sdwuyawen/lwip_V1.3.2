@@ -340,6 +340,7 @@ struct tcp_pcb {
 	/* 用于周期性的poll。当polltmr==pollinterval时，poll函数会被调用 */
   u8_t polltmr, pollinterval;
   
+	/* 重传定时器，大于rto时会重传 */
   /* Retransmission timer. */
   s16_t rtime;
   
@@ -370,6 +371,7 @@ struct tcp_pcb {
   /* sender variables */
   u32_t snd_nxt;   /* next new seqno to be sent */
   u16_t snd_wnd;   /* sender window */
+	/* 上次窗口更新时，收到的数据序号和确认序号 */
   u32_t snd_wl1, snd_wl2; /* Sequence and acknowledgement numbers of last
                              window update. */
   u32_t snd_lbb;       /* Sequence number of next byte to be buffered. */
