@@ -414,7 +414,7 @@ tcp_listen_with_backlog(struct tcp_pcb *pcb, u8_t backlog)
   lpcb->accepts_pending = 0;
   lpcb->backlog = (backlog ? backlog : 1);
 #endif /* TCP_LISTEN_BACKLOG */
-	/* 把新控制块加入tcp_listen_pcbs链表 */
+	/* 把新控制块加入tcp_listen_pcbs链表首部 */
   TCP_REG(&tcp_listen_pcbs.listen_pcbs, lpcb);
 	/* 返回新控制块指针 */
   return (struct tcp_pcb *)lpcb;
@@ -541,47 +541,62 @@ tcp_connect(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port,
   LWIP_ERROR("tcp_connect: can only connected from state CLOSED", pcb->state == CLOSED, return ERR_ISCONN);
 
   LWIP_DEBUGF(TCP_DEBUG, ("tcp_connect to port %"U16_F"\n", port));
+	/* 远端IP地址有效，则记录到TCP控制块中 */
   if (ipaddr != NULL) {
     pcb->remote_ip = *ipaddr;
   } else {
     return ERR_VAL;
   }
+	/* 记录远端PORT */
   pcb->remote_port = port;
+	/* 如果本地端口未绑定，则绑定一个短暂端口 */
   if (pcb->local_port == 0) {
     pcb->local_port = tcp_new_port();
   }
+	/* 获取初始序号 */
   iss = tcp_next_iss();
+	/* 设置接收窗口下一个接收的序号 */
   pcb->rcv_nxt = 0;
+	/* 设置发送窗口各个字段 */
   pcb->snd_nxt = iss;
   pcb->lastack = iss - 1;
   pcb->snd_lbb = iss - 1;
+	/* 设置接收窗口各个字段 */
   pcb->rcv_wnd = TCP_WND;
   pcb->rcv_ann_wnd = TCP_WND;
   pcb->rcv_ann_right_edge = pcb->rcv_nxt;
   pcb->snd_wnd = TCP_WND;
   /* As initial send MSS, we use TCP_MSS but limit it to 536.
      The send MSS is updated when an MSS option is received. */
+	/* 设置MSS */
   pcb->mss = (TCP_MSS > 536) ? 536 : TCP_MSS;
 #if TCP_CALCULATE_EFF_SEND_MSS
   pcb->mss = tcp_eff_send_mss(pcb->mss, ipaddr);
 #endif /* TCP_CALCULATE_EFF_SEND_MSS */
+	/* 初始化阻塞窗口 */
   pcb->cwnd = 1;
   pcb->ssthresh = pcb->mss * 10;
+	/* TCP控制块状态设为SYN_SENT */
   pcb->state = SYN_SENT;
-#if LWIP_CALLBACK_API  
+#if LWIP_CALLBACK_API
+	/* 设置回调函数 */
   pcb->connected = connected;
 #endif /* LWIP_CALLBACK_API */
+	/* 把TCP控制块从tcp_bound_pcbs链表移除 */
   TCP_RMV(&tcp_bound_pcbs, pcb);
+	/* 把TCP控制块插入tcp_active_pcbs链表 */
   TCP_REG(&tcp_active_pcbs, pcb);
 
   snmp_inc_tcpactiveopens();
   
+	/* 构造TCP报文，长度为0，SYN置1，并包含MSS选项字段 */
   ret = tcp_enqueue(pcb, NULL, 0, TCP_SYN, 0, TF_SEG_OPTS_MSS
 #if LWIP_TCP_TIMESTAMPS
                     | TF_SEG_OPTS_TS
 #endif
                     );
   if (ret == ERR_OK) { 
+		/* 发送构造的TCP报文 */
     tcp_output(pcb);
   }
   return ret;
