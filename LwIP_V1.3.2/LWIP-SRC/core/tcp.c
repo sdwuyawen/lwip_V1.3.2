@@ -272,6 +272,7 @@ tcp_abandon(struct tcp_pcb *pcb, int reset)
  * @return ERR_USE if the port is already in use
  *         ERR_OK if bound
  */
+/* 绑定TCP控制块到本地端口 */
 err_t
 tcp_bind(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
 {
@@ -279,22 +280,32 @@ tcp_bind(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
 
   LWIP_ERROR("tcp_bind: can only bind in state CLOSED", pcb->state == CLOSED, return ERR_ISCONN);
 
+	/* 未指定端口号，则自动分配 */
   if (port == 0) {
     port = tcp_new_port();
   }
   /* Check if the address already is in use. */
   /* Check the listen pcbs. */
+	/* 检查指定的 IP:端口号 有没有被其它TCP控制块占用 */
+	/* 先检查处于LISTEN状态的TCP控制块 */
   for(cpcb = (struct tcp_pcb *)tcp_listen_pcbs.pcbs;
       cpcb != NULL; cpcb = cpcb->next) {
+		/* 端口号相同 */
     if (cpcb->local_port == port) {
+			/* 其它TCP控制块绑定到本地所有IP
+			 * 或要绑定的TCP控制块绑定到本地所有IP
+			 * 或要绑定的IP和其它TCP控制块的本地IP相同
+			 */
       if (ip_addr_isany(&(cpcb->local_ip)) ||
           ip_addr_isany(ipaddr) ||
           ip_addr_cmp(&(cpcb->local_ip), ipaddr)) {
+				/* 该本地IP:本地PORT已经被占用，返回错误 */
         return ERR_USE;
       }
     }
   }
   /* Check the connected pcbs. */
+	/* 检查处于连接状态TCP控制块 */
   for(cpcb = tcp_active_pcbs;
       cpcb != NULL; cpcb = cpcb->next) {
     if (cpcb->local_port == port) {
@@ -306,6 +317,7 @@ tcp_bind(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
     }
   }
   /* Check the bound, not yet connected pcbs. */
+	/* 检查已绑定但未连接的TCP控制块 */
   for(cpcb = tcp_bound_pcbs; cpcb != NULL; cpcb = cpcb->next) {
     if (cpcb->local_port == port) {
       if (ip_addr_isany(&(cpcb->local_ip)) ||
@@ -317,6 +329,7 @@ tcp_bind(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
   }
   /* @todo: until SO_REUSEADDR is implemented (see task #6995 on savannah),
    * we have to check the pcbs in TIME-WAIT state, also: */
+	/* 检查处于TIME-WAIT状态的TCP控制块 */
   for(cpcb = tcp_tw_pcbs; cpcb != NULL; cpcb = cpcb->next) {
     if (cpcb->local_port == port) {
       if (ip_addr_cmp(&(cpcb->local_ip), ipaddr)) {
@@ -325,9 +338,11 @@ tcp_bind(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port)
     }
   }
 
+	/* 设置TCP控制块中的本地IP */
   if (!ip_addr_isany(ipaddr)) {
     pcb->local_ip = *ipaddr;
   }
+	/* 设置TCP控制块的本地端口号 */
   pcb->local_port = port;
   TCP_REG(&tcp_bound_pcbs, pcb);
   LWIP_DEBUGF(TCP_DEBUG, ("tcp_bind: bind to port %"U16_F"\n", port));
