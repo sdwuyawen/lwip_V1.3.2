@@ -622,6 +622,7 @@ tcp_connect(struct tcp_pcb *pcb, struct ip_addr *ipaddr, u16_t port,
  *
  * Automatically called from tcp_tmr().
  */
+/* TCP慢定时器，500ms */
 void
 tcp_slowtmr(void)
 {
@@ -633,9 +634,11 @@ tcp_slowtmr(void)
 
   err = ERR_OK;
 
+	/* 系统时钟+1 */
   ++tcp_ticks;
 
   /* Steps through all of the active PCBs. */
+	/* 处理tcp_active_pcbs链表 */
   prev = NULL;
   pcb = tcp_active_pcbs;
   if (pcb == NULL) {
@@ -707,6 +710,7 @@ tcp_slowtmr(void)
       }
     }
     /* Check if this PCB has stayed too long in FIN-WAIT-2 */
+		/* FIN_WAIT_2定时器超时 */
     if (pcb->state == FIN_WAIT_2) {
       if ((u32_t)(tcp_ticks - pcb->tmr) >
           TCP_FIN_WAIT_TIMEOUT / TCP_SLOW_INTERVAL) {
@@ -753,9 +757,11 @@ tcp_slowtmr(void)
     /* If this PCB has queued out of sequence data, but has been
        inactive for too long, will drop the data (it will eventually
        be retransmitted). */
+		/* 失序报文段重组超时 */
 #if TCP_QUEUE_OOSEQ    
     if (pcb->ooseq != NULL &&
         (u32_t)tcp_ticks - pcb->tmr >= pcb->rto * TCP_OOSEQ_TIMEOUT) {
+			/* 删除队列中所有报文段 */
       tcp_segs_free(pcb->ooseq);
       pcb->ooseq = NULL;
       LWIP_DEBUGF(TCP_CWND_DEBUG, ("tcp_slowtmr: dropping OOSEQ queued data\n"));
@@ -763,6 +769,7 @@ tcp_slowtmr(void)
 #endif /* TCP_QUEUE_OOSEQ */
 
     /* Check if this PCB has stayed too long in SYN-RCVD */
+		/* 连接建立定时器，在SYN_RCVD状态超过20s未收到ACK，则终止连接 */
     if (pcb->state == SYN_RCVD) {
       if ((u32_t)(tcp_ticks - pcb->tmr) >
           TCP_SYN_RCVD_TIMEOUT / TCP_SLOW_INTERVAL) {
@@ -772,6 +779,7 @@ tcp_slowtmr(void)
     }
 
     /* Check if this PCB has stayed too long in LAST-ACK */
+		/* LAST_ACK状态超时 */
     if (pcb->state == LAST_ACK) {
       if ((u32_t)(tcp_ticks - pcb->tmr) > 2 * TCP_MSL / TCP_SLOW_INTERVAL) {
         ++pcb_remove;
@@ -779,6 +787,7 @@ tcp_slowtmr(void)
       }
     }
 
+		/* 如果pcb_remove不为0，则删除控制块 */
     /* If the PCB should be removed, do it. */
     if (pcb_remove) {
       tcp_pcb_purge(pcb);      
@@ -801,7 +810,9 @@ tcp_slowtmr(void)
       pcb2 = pcb->next;
       memp_free(MEMP_TCP_PCB, pcb);
       pcb = pcb2;
-    } else {
+    }
+		/* 否则调用用户的poll函数 */
+		else {
 
       /* We check if we should poll the connection. */
       ++pcb->polltmr;
@@ -814,12 +825,13 @@ tcp_slowtmr(void)
         }
       }
       
+			/* 取得链表上下一个TCP控制块 */
       prev = pcb;
       pcb = pcb->next;
     }
   }
 
-  
+  /* 处理tcp_tw_pcbs链表 */
   /* Steps through all of the TIME-WAIT PCBs. */
   prev = NULL;    
   pcb = tcp_tw_pcbs;
@@ -827,14 +839,17 @@ tcp_slowtmr(void)
     LWIP_ASSERT("tcp_slowtmr: TIME-WAIT pcb->state == TIME-WAIT", pcb->state == TIME_WAIT);
     pcb_remove = 0;
 
+		/*  TCP控制块在TIME-WAIT状态时间过长*/
     /* Check if this PCB has stayed long enough in TIME-WAIT */
     if ((u32_t)(tcp_ticks - pcb->tmr) > 2 * TCP_MSL / TCP_SLOW_INTERVAL) {
-      ++pcb_remove;
+      /* 设置删除标志 */
+			++pcb_remove;
     }
     
 
 
     /* If the PCB should be removed, do it. */
+		/* 删除控制块 */
     if (pcb_remove) {
       tcp_pcb_purge(pcb);      
       /* Remove PCB from tcp_tw_pcbs list. */
@@ -846,10 +861,12 @@ tcp_slowtmr(void)
         LWIP_ASSERT("tcp_slowtmr: first pcb == tcp_tw_pcbs", tcp_tw_pcbs == pcb);
         tcp_tw_pcbs = pcb->next;
       }
+			/* 获取链表上下一个控制块 */
       pcb2 = pcb->next;
       memp_free(MEMP_TCP_PCB, pcb);
       pcb = pcb2;
     } else {
+			/* 获取链表上下一个控制块 */
       prev = pcb;
       pcb = pcb->next;
     }
