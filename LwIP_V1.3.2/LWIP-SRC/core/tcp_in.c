@@ -416,6 +416,7 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
 
   /* In the LISTEN state, we check for incoming SYN segments,
      creates a new PCB, and responds with a SYN|ACK. */
+	/* 侦听到包含ACK的报文段，则返回RST。SYN包不应该包含ACK */
   if (flags & TCP_ACK) {
     /* For incoming segments with the ACK flag set, respond with a
        RST. */
@@ -423,7 +424,9 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
     tcp_rst(ackno + 1, seqno + tcplen,
       &(iphdr->dest), &(iphdr->src),
       tcphdr->dest, tcphdr->src);
-  } else if (flags & TCP_SYN) {
+  }
+	/* 收到SYN握手报文 */
+	else if (flags & TCP_SYN) {
     LWIP_DEBUGF(TCP_DEBUG, ("TCP connection request %"U16_F" -> %"U16_F".\n", tcphdr->src, tcphdr->dest));
 #if TCP_LISTEN_BACKLOG
     if (pcb->accepts_pending >= pcb->backlog) {
@@ -431,6 +434,7 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
       return ERR_ABRT;
     }
 #endif /* TCP_LISTEN_BACKLOG */
+		/* 新建一个TCP控制块 */
     npcb = tcp_alloc(pcb->prio);
     /* If a new PCB could not be created (probably due to lack of memory),
        we don't do anything, but rely on the sender will retransmit the
@@ -444,15 +448,20 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
     pcb->accepts_pending++;
 #endif /* TCP_LISTEN_BACKLOG */
     /* Set up the new PCB. */
+		/* 设置TCP控制块的4个字段 */
     ip_addr_set(&(npcb->local_ip), &(iphdr->dest));
     npcb->local_port = pcb->local_port;
     ip_addr_set(&(npcb->remote_ip), &(iphdr->src));
     npcb->remote_port = tcphdr->src;
+		/* 设置连接状态 */
     npcb->state = SYN_RCVD;
+		/* 下一个接收数据序号 */
     npcb->rcv_nxt = seqno + 1;
     npcb->rcv_ann_right_edge = npcb->rcv_nxt;
+		/* 设置发送窗口 */
     npcb->snd_wnd = tcphdr->wnd;
     npcb->ssthresh = npcb->snd_wnd;
+		/* 上次窗口更新时，收到的序号设为seqno - 1。这样，在收到ACK时会更新窗口 */
     npcb->snd_wl1 = seqno - 1;/* initialise to seqno-1 to force window update */
     npcb->callback_arg = pcb->callback_arg;
 #if LWIP_CALLBACK_API
@@ -462,27 +471,33 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
     npcb->so_options = pcb->so_options & (SOF_DEBUG|SOF_DONTROUTE|SOF_KEEPALIVE|SOF_OOBINLINE|SOF_LINGER);
     /* Register the new PCB so that we can begin receiving segments
        for it. */
+		/* 把新控制块加入tcp_active_pcbs链表 */
     TCP_REG(&tcp_active_pcbs, npcb);
 
     /* Parse any options in the SYN. */
+		/* 处理SYN包中的选项字段，设置TCP控制块中与相应选项对应的位 */
     tcp_parseopt(npcb);
 #if TCP_CALCULATE_EFF_SEND_MSS
+		/* 设置MSS,取对方通告的MSS和本地MTU限制的MSS的较小值 */
     npcb->mss = tcp_eff_send_mss(npcb->mss, &(npcb->remote_ip));
 #endif /* TCP_CALCULATE_EFF_SEND_MSS */
 
     snmp_inc_tcppassiveopens();
 
     /* Send a SYN|ACK together with the MSS option. */
+		/* 构造SYN+ACK握手报文，包含MSS选项，通告自己的MSS */
     rc = tcp_enqueue(npcb, NULL, 0, TCP_SYN | TCP_ACK, 0, TF_SEG_OPTS_MSS
 #if LWIP_TCP_TIMESTAMPS
       /* and maybe include the TIMESTAMP option */
      | (npcb->flags & TF_TIMESTAMP ? TF_SEG_OPTS_TS : 0)
 #endif
       );
+		/* 构造报文出错，则释放TCP控制块 */
     if (rc != ERR_OK) {
       tcp_abandon(npcb, 0);
       return rc;
     }
+		/* 发送报文 */
     return tcp_output(npcb);
   }
   return ERR_OK;
