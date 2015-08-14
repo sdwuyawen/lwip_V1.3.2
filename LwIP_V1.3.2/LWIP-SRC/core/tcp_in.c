@@ -497,6 +497,9 @@ tcp_listen_input(struct tcp_pcb_listen *pcb)
  * @note the segment which arrived is saved in global variables, therefore only the pcb
  *       involved is passed as a parameter to this function
  */
+/* TIME_WAIT状态的TCP控制块报文处理函数
+ * 忽略所有RST、FIN、ACK置位的报文，任何数据都会被删除，但要回复ACK
+ */
 static err_t
 tcp_timewait_input(struct tcp_pcb *pcb)
 {
@@ -505,6 +508,7 @@ tcp_timewait_input(struct tcp_pcb *pcb)
    * - first check sequence number - we skip that one in TIME_WAIT (always
    *   acceptable since we only send ACKs)
    * - second check the RST bit (... return) */
+	/* 若报文的RST置位，则直接返回 */
   if (flags & TCP_RST)  {
     return ERR_OK;
   }
@@ -512,18 +516,23 @@ tcp_timewait_input(struct tcp_pcb *pcb)
   if (flags & TCP_SYN) {
     /* If an incoming segment is not acceptable, an acknowledgment
        should be sent in reply */
+		/* 如果报文包含SYN，且握手数据编号在接收窗口内，则回复RST */
     if (TCP_SEQ_BETWEEN(seqno, pcb->rcv_nxt, pcb->rcv_nxt+pcb->rcv_wnd)) {
       /* If the SYN is in the window it is an error, send a reset */
       tcp_rst(ackno, seqno + tcplen, &(iphdr->dest), &(iphdr->src),
         tcphdr->dest, tcphdr->src);
       return ERR_OK;
     }
-  } else if (flags & TCP_FIN) {
+  }
+	/* 报文包含FIN */
+	else if (flags & TCP_FIN) {
     /* - eighth, check the FIN bit: Remain in the TIME-WAIT state.
          Restart the 2 MSL time-wait timeout.*/
+		/* TIME-WAIT状态重新计时 */
     pcb->tmr = tcp_ticks;
   }
 
+	/* 对于数据段不为空的TCP报文，或者在接收窗口外的SYN报文，回复ACK */
   if ((tcplen > 0))  {
     /* Acknowledge data, FIN or out-of-window SYN */
     pcb->flags |= TF_ACK_NOW;
