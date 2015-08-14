@@ -89,6 +89,9 @@ static err_t tcp_timewait_input(struct tcp_pcb *pcb);
  * @param p received TCP segment to process (p->payload pointing to the IP header)
  * @param inp network interface on which this segment was received
  */
+/* TCP数据报处理的入口函数，校验TCP首部，找到对应的TCP控制块，并调用
+ * tcp_process(), tcp_listen_input(), tcp_timewait_input()等
+ */
 void
 tcp_input(struct pbuf *p, struct netif *inp)
 {
@@ -288,20 +291,28 @@ tcp_input(struct pbuf *p, struct netif *inp)
         return;
       }
     }
+		/* 记录处理当前TCP报文的TCP控制块 */
     tcp_input_pcb = pcb;
+		/* 处理TCP报文 */
     err = tcp_process(pcb);
     /* A return value of ERR_ABRT means that tcp_abort() was called
        and that the pcb has been freed. If so, we don't do anything. */
     if (err != ERR_ABRT) {
+			/* 收到对方的复位报文 */
       if (recv_flags & TF_RESET) {
         /* TF_RESET means that the connection was reset by the other
            end. We then call the error callback to inform the
            application that the connection is dead before we
            deallocate the PCB. */
+				/* 调用用户回调函数 */
         TCP_EVENT_ERR(pcb->errf, pcb->callback_arg, ERR_RST);
+				/* 把TCP控制块从tcp_active_pcbs链表删除 */
         tcp_pcb_remove(&tcp_active_pcbs, pcb);
+				/* 释放控制块 */
         memp_free(MEMP_TCP_PCB, pcb);
-      } else if (recv_flags & TF_CLOSED) {
+      }
+			/* 双方断开连接 */
+			else if (recv_flags & TF_CLOSED) {
         /* The connection has been closed and we will deallocate the
            PCB. */
         tcp_pcb_remove(&tcp_active_pcbs, pcb);
@@ -311,20 +322,26 @@ tcp_input(struct pbuf *p, struct netif *inp)
         /* If the application has registered a "sent" function to be
            called when new send buffer space is available, we call it
            now. */
+				/* 如果有数据被确认，则调用用户的sent函数 */
         if (pcb->acked > 0) {
           TCP_EVENT_SENT(pcb, pcb->acked, err);
         }
       
+				/* 如果有数据收到 */
         if (recv_data != NULL) {
+					/* 如果有PSH标志，则设置pbuf首部的flags字段 */
           if(flags & TCP_PSH) {
             recv_data->flags |= PBUF_FLAG_PUSH;
           }
 
+					/* 回调用户的recv函数 */
           /* Notify application that data has been received. */
           TCP_EVENT_RECV(pcb, recv_data, ERR_OK, err);
 
+					/* 如果用户处理数据失败 */
           /* If the upper layer can't receive this data, store it */
           if (err != ERR_OK) {
+						/* 将数据暂存在pcb->refused_data中 */
             pcb->refused_data = recv_data;
             LWIP_DEBUGF(TCP_INPUT_DEBUG, ("tcp_input: keep incoming packet, because pcb is \"full\"\n"));
           }
@@ -332,12 +349,17 @@ tcp_input(struct pbuf *p, struct netif *inp)
 
         /* If a FIN segment was received, we call the callback
            function with a NULL buffer to indicate EOF. */
+				/* 如果收到对方的FIN，则用NULL作为参数回调recv函数，通知
+				 * 用户程序对方已经关闭连接
+				 */
         if (recv_flags & TF_GOT_FIN) {
           TCP_EVENT_RECV(pcb, NULL, ERR_OK, err);
         }
 
+				/* 当前处理TCP报文的TCP控制块清0 */
         tcp_input_pcb = NULL;
         /* Try to send something out. */
+				/* 尝试发送报文 */
         tcp_output(pcb);
 #if TCP_INPUT_DEBUG
 #if TCP_DEBUG
