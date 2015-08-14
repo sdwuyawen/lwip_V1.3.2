@@ -59,6 +59,7 @@ void LWIP_Polling(void)
 	}
 	if(timer_expired(&last_tcp_time,TCP_TMR_INTERVAL/MS_PER_CLOCKTICK))		//TCP处理定时器处理函数
 	{
+		/* 调用TCP定时器 */
 		tcp_tmr();
 	}
 	

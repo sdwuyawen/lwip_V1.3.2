@@ -879,24 +879,31 @@ tcp_slowtmr(void)
  *
  * Automatically called from tcp_tmr().
  */
+/* TCP快定时器，250ms */
 void
 tcp_fasttmr(void)
 {
   struct tcp_pcb *pcb;
 
+	/* 遍历tcp_active_pcbs */
   for(pcb = tcp_active_pcbs; pcb != NULL; pcb = pcb->next) {
     /* If there is data which was previously "refused" by upper layer */
+		/* 如果之前有数据被上层拒绝，则再次调用recv回调函数
+		 * refused_data在tcp_input()中被设置
+		 */
     if (pcb->refused_data != NULL) {
       /* Notify again application with data previously received. */
       err_t err;
       LWIP_DEBUGF(TCP_INPUT_DEBUG, ("tcp_fasttmr: notify kept packet\n"));
+			/* 调用用户函数接收数据 */
       TCP_EVENT_RECV(pcb, pcb->refused_data, ERR_OK, err);
       if (err == ERR_OK) {
         pcb->refused_data = NULL;
       }
     }
 
-    /* send delayed ACKs */  
+    /* send delayed ACKs */
+		/* 如果设置了延迟确认，则立即发送ACK */
     if (pcb->flags & TF_ACK_DELAY) {
       LWIP_DEBUGF(TCP_DEBUG, ("tcp_fasttmr: delayed ACK\n"));
       tcp_ack_now(pcb);
