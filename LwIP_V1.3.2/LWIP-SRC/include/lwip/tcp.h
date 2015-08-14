@@ -557,6 +557,7 @@ err_t lwip_tcp_event(void *arg, struct tcp_pcb *pcb,
 #endif /* LWIP_EVENT_API */
 
 /* This structure represents a TCP segment on the unsent and unacked queues */
+/* 待发送、已接收数据组织成的TCP报文段结构 */
 struct tcp_seg {
   struct tcp_seg *next;    /* used when putting segements on a queue */
   struct pbuf *p;          /* buffer containing data + TCP header */

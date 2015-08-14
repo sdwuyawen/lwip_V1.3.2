@@ -151,6 +151,7 @@ tcp_write(struct tcp_pcb *pcb, const void *data, u16_t len, u8_t apiflags)
  * - TCP_WRITE_FLAG_MORE (0x02) for TCP connection, PSH flag will be set on last segment sent,
  * @param optflags options to include in segment later on (see definition of struct tcp_seg)
  */
+/* 将数据报文段或者连接的握手报文段放到TCP控制块的发送队列上 */
 err_t
 tcp_enqueue(struct tcp_pcb *pcb, void *arg, u16_t len,
             u8_t flags, u8_t apiflags, u8_t optflags)
@@ -408,6 +409,7 @@ tcp_enqueue(struct tcp_pcb *pcb, void *arg, u16_t len,
   pcb->snd_buf -= len;
 
   /* update number of segments on the queues */
+	/* 控制块已占用pbuf个数 */
   pcb->snd_queuelen = queuelen;
   LWIP_DEBUGF(TCP_QLEN_DEBUG, ("tcp_enqueue: %"S16_F" (after enqueued)\n", pcb->snd_queuelen));
   if (pcb->snd_queuelen != 0) {
@@ -514,6 +516,7 @@ tcp_send_empty_ack(struct tcp_pcb *pcb)
  * @return ERR_OK if data has been sent or nothing to send
  *         another err_t on error
  */
+/* 发送控制块缓存队列中的报文段 */
 err_t
 tcp_output(struct tcp_pcb *pcb)
 {
@@ -531,6 +534,7 @@ tcp_output(struct tcp_pcb *pcb)
     return ERR_OK;
   }
 
+	/* 实际窗口为发送窗口和阻塞窗口的最小值 */
   wnd = LWIP_MIN(pcb->snd_wnd, pcb->cwnd);
 
   seg = pcb->unsent;
@@ -541,6 +545,9 @@ tcp_output(struct tcp_pcb *pcb)
    *
    * If data is to be sent, we will just piggyback the ACK (see below).
    */
+	/* 如果要求立刻确认，且ACK又不能被捎带出去或发送窗口不允许发送报文
+	 * 则只发送一个ACK报文
+	 */
   if (pcb->flags & TF_ACK_NOW &&
      (seg == NULL ||
       ntohl(seg->tcphdr->seqno) - pcb->lastack + seg->len > wnd)) {
@@ -599,30 +606,43 @@ tcp_output(struct tcp_pcb *pcb)
     ++i;
 #endif /* TCP_CWND_DEBUG */
 
+		/* 从缓冲队列中删除报文 */
     pcb->unsent = seg->next;
 
+		/* 当前不为SYN_SENT状态 */
     if (pcb->state != SYN_SENT) {
+			/* 设置首部中的ACK标志 */
       TCPH_SET_FLAG(seg->tcphdr, TCP_ACK);
+			/* 清除标志 */
       pcb->flags &= ~(TF_ACK_DELAY | TF_ACK_NOW);
     }
 
+		/* 通过IP层实际发送报文段 */
     tcp_output_segment(seg, pcb);
     snd_nxt = ntohl(seg->tcphdr->seqno) + TCP_TCPLEN(seg);
+		/* 更新下一个要发送数据的编号 */
     if (TCP_SEQ_LT(pcb->snd_nxt, snd_nxt)) {
       pcb->snd_nxt = snd_nxt;
     }
     /* put segment on unacknowledged list if length > 0 */
+		/* 如果TCP报文数据长度>0，或者含有SYN、FIN标志，则把
+		 * 该报文放入uacked队列中，以便超时后重传
+		 */
     if (TCP_TCPLEN(seg) > 0) {
       seg->next = NULL;
       /* unacked list is empty? */
+			/* 未确认队列空，则直接挂接到队列头 */
       if (pcb->unacked == NULL) {
         pcb->unacked = seg;
         useg = seg;
       /* unacked list is not empty? */
-      } else {
+      }
+			/* 未确认队列非空，则把当前报文安装顺序组织在队列中 */
+			else {
         /* In the case of fast retransmit, the packet should not go to the tail
          * of the unacked queue, but rather somewhere before it. We need to check for
          * this case. -STJ Jul 27, 2004 */
+				/* 如果待插入的报文序号比队列尾部的报文序号低，则从队列头部开始查找合适位置，插入到链表 */
         if (TCP_SEQ_LT(ntohl(seg->tcphdr->seqno), ntohl(useg->tcphdr->seqno))){
           /* add segment to before tail of unacked list, keeping the list sorted */
           struct tcp_seg **cur_seg = &(pcb->unacked);
@@ -632,19 +652,23 @@ tcp_output(struct tcp_pcb *pcb)
           }
           seg->next = (*cur_seg);
           (*cur_seg) = seg;
-        } else {
+        } else {		/* 报文段序号最高，直接放在未确认队列尾部 */
           /* add segment to tail of unacked list */
           useg->next = seg;
           useg = useg->next;
         }
       }
     /* do not queue empty segments on the unacked list */
-    } else {
+    }
+		/* 报文段长度为0，不需要重传，直接删除 */
+		else {
       tcp_seg_free(seg);
     }
+		/* 处理下一个待发送报文 */
     seg = pcb->unsent;
   }
 
+	/* 如果发送窗口被填满，且还有报文待发送,则启动坚持定时器进行零窗口探测 */
   if (seg != NULL && pcb->persist_backoff == 0 && 
       ntohl(seg->tcphdr->seqno) - pcb->lastack + seg->len > pcb->snd_wnd) {
     /* prepare for persist timer */
