@@ -38,7 +38,7 @@ u32_t last_dhcp_coarse_time;
 u32 dhcp_ip=0;
 #endif
 
-
+extern void telnet_init(void);
 void loopclient_init(void);
 
 //LWIP查询
@@ -468,4 +468,6 @@ void LwIP_APP_Init(void)
 	loopclient_init();	//初始化环回接口  client
 	
 	udp_demo_init();		/* 初始化UDP服务器 */
+	
+	telnet_init();
 }
